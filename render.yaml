@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: autoinspector
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
