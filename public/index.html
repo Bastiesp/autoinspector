@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoInspector — Revisión IA antes de comprar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="hero">
+    <nav class="nav">
+      <div class="brand">
+        <span class="brand-icon">AI</span>
+        <span>AutoInspector</span>
+      </div>
+      <a class="nav-link" href="#inspeccion">Crear informe</a>
+    </nav>
+
+    <section class="hero-grid">
+      <div>
+        <p class="eyebrow">Inspección preliminar asistida por IA</p>
+        <h1>Evalúa mejor un auto usado antes de comprarlo.</h1>
+        <p class="hero-text">
+          Sube fotos clave tomadas en el momento, agrega datos del vehículo y recibe un informe inicial con riesgos,
+          preguntas para el vendedor y próximos pasos recomendados.
+        </p>
+        <div class="hero-actions">
+          <a class="primary-btn" href="#inspeccion">Empezar revisión</a>
+          <a class="secondary-btn" href="#como-funciona">Cómo funciona</a>
+        </div>
+      </div>
+      <div class="hero-card">
+        <h2>Fotos mínimas requeridas</h2>
+        <ul>
+          <li>Varilla de aceite</li>
+          <li>Neumáticos</li>
+          <li>Motor / vano motor</li>
+        </ul>
+        <p>
+          Mientras más evidencia agregues, más útil será el informe. La revisión final debe hacerla un mecánico presencialmente.
+        </p>
+      </div>
+    </section>
+  </header>
+
+  <main>
+    <section id="como-funciona" class="section narrow">
+      <p class="eyebrow">Objetivo real</p>
+      <h2>No reemplaza al mecánico: te ayuda a comprar con más información.</h2>
+      <p>
+        AutoInspector entrega una orientación inicial. Detecta señales de alerta, sugiere preguntas y te indica qué verificar antes de pagar.
+        El paso final recomendado siempre será una inspección profesional presencial.
+      </p>
+    </section>
+
+    <section id="inspeccion" class="section form-section">
+      <div class="section-heading">
+        <p class="eyebrow">Informe inicial</p>
+        <h2>Datos del vehículo</h2>
+      </div>
+
+      <form id="inspectionForm" class="inspection-form">
+        <div class="form-grid">
+          <label>Marca
+            <input required name="brand" placeholder="Ej: Jeep" />
+          </label>
+          <label>Modelo
+            <input required name="model" placeholder="Ej: Renegade 1.8" />
+          </label>
+          <label>Año
+            <input required name="year" type="number" min="1980" max="2027" placeholder="Ej: 2018" />
+          </label>
+          <label>Kilometraje
+            <input required name="km" inputmode="numeric" placeholder="Ej: 98000" />
+          </label>
+          <label>Precio publicado
+            <input name="price" inputmode="numeric" placeholder="Ej: 8500000" />
+          </label>
+          <label>Combustible
+            <select name="fuel">
+              <option value="">Seleccionar</option>
+              <option>Bencina</option>
+              <option>Diésel</option>
+              <option>Híbrido</option>
+              <option>Eléctrico</option>
+              <option>Gas</option>
+            </select>
+          </label>
+          <label>Transmisión
+            <select name="transmission">
+              <option value="">Seleccionar</option>
+              <option>Manual</option>
+              <option>Automática</option>
+              <option>CVT</option>
+              <option>No informado</option>
+            </select>
+          </label>
+        </div>
+
+        <label>Notas del vendedor o antecedentes conocidos
+          <textarea name="sellerNotes" rows="4" placeholder="Ej: mantenciones al día, único dueño, falla declarada, choque anterior, etc."></textarea>
+        </label>
+
+        <label>Preguntas o dudas que ya tienes
+          <textarea name="buyerQuestions" rows="3" placeholder="Ej: me preocupa que consuma aceite, temperatura, humo, ruidos, etc."></textarea>
+        </label>
+
+        <div class="section-heading inner">
+          <p class="eyebrow">Fotos tomadas en el momento</p>
+          <h2>Evidencia visual</h2>
+          <p>En celular, el botón abre cámara o galería. Idealmente toma fotos nítidas, con buena luz y cerca del componente.</p>
+        </div>
+
+        <div class="photo-grid">
+          <label class="photo-card required">Varilla de aceite <span>obligatoria</span>
+            <input required type="file" name="oilDipstick" accept="image/*" capture="environment" />
+          </label>
+          <label class="photo-card required">Neumáticos <span>obligatoria</span>
+            <input required type="file" name="tires" accept="image/*" capture="environment" />
+          </label>
+          <label class="photo-card required">Motor / vano motor <span>obligatoria</span>
+            <input required type="file" name="engineBay" accept="image/*" capture="environment" />
+          </label>
+          <label class="photo-card">Refrigerante / depósito <span>opcional</span>
+            <input type="file" name="coolant" accept="image/*" capture="environment" />
+          </label>
+          <label class="photo-card">Tablero / kilometraje <span>opcional</span>
+            <input type="file" name="dashboard" accept="image/*" capture="environment" />
+          </label>
+          <label class="photo-card">Carrocería / pintura <span>opcional</span>
+            <input type="file" name="bodywork" accept="image/*" capture="environment" />
+          </label>
+          <label class="photo-card">Interior <span>opcional</span>
+            <input type="file" name="interior" accept="image/*" capture="environment" />
+          </label>
+          <label class="photo-card">Escape / humo visible <span>opcional</span>
+            <input type="file" name="exhaust" accept="image/*" capture="environment" />
+          </label>
+        </div>
+
+        <div class="notice">
+          <strong>Importante:</strong> este informe es una ayuda preliminar. No certifica el estado real del vehículo ni reemplaza una revisión mecánica presencial.
+        </div>
+
+        <button id="submitBtn" class="primary-btn full" type="submit">Generar informe AutoInspector</button>
+      </form>
+    </section>
+
+    <section id="resultSection" class="section result-section hidden">
+      <div class="result-header">
+        <div>
+          <p class="eyebrow">Resultado</p>
+          <h2>Informe AutoInspector</h2>
+        </div>
+        <button id="printBtn" class="secondary-btn" type="button">Imprimir / guardar PDF</button>
+      </div>
+      <div id="resultContent" class="result-content"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>AutoInspector — Orientación inicial para compradores de vehículos usados.</p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
