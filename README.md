@@ -71,3 +71,17 @@ POST /api/inspect
 ## Importante
 
 El informe es una orientación preliminar. No reemplaza la revisión presencial de un mecánico profesional.
+
+
+## Cambios versión gris + contacto
+- Fondo general cambiado a escala de grises profesional, manteniendo botones e iconos verdes.
+- Botones de contacto ahora abren WhatsApp si existe `CONTACT_WHATSAPP`; si no, abren correo con `CONTACT_EMAIL`.
+- Si no configuras ninguna variable de contacto, el botón muestra un aviso en pantalla en vez de quedar sin acción.
+
+Ejemplo de WhatsApp para Chile:
+
+```env
+CONTACT_WHATSAPP=56912345678
+```
+
+No uses `+`, espacios ni guiones en el número.
