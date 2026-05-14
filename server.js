@@ -94,45 +94,64 @@ function analyzePrice(purchasePrice, marketPrice) {
   if (!purchasePrice || !marketPrice) {
     return {
       category: 'Datos insuficientes',
+      level: 'unknown',
       differencePercent: null,
+      differenceAmount: null,
       summary: 'Para comparar precio de compra versus mercado, ingresa ambos valores.',
-      warning: 'Cuando no hay precio de mercado, no se puede saber si una oferta baja es oportunidad o señal de riesgo.'
+      warning: 'Sin precio de mercado no es posible saber si la oferta es una oportunidad real o una señal de riesgo.',
+      negotiationAdvice: 'Busca al menos 3 a 5 publicaciones comparables del mismo año, versión, kilometraje y estado antes de decidir.'
     };
   }
 
-  const diff = ((purchasePrice - marketPrice) / marketPrice) * 100;
+  const diffAmount = purchasePrice - marketPrice;
+  const diff = (diffAmount / marketPrice) * 100;
   const abs = Math.abs(diff);
   let category;
+  let level;
   let summary;
   let warning;
+  let negotiationAdvice;
 
   if (diff <= -25) {
     category = 'Muy por debajo del mercado';
-    summary = `El precio está aproximadamente ${abs.toFixed(1)}% bajo el valor de mercado.`;
-    warning = 'Puede ser una oportunidad, pero también una señal de alerta: revisar deuda, choques, motor, caja, kilometraje real y motivo de venta.';
+    level = 'critical-low';
+    summary = `El precio de compra está aproximadamente ${abs.toFixed(1)}% bajo el valor de mercado (${formatClp(Math.abs(diffAmount))} menos).`;
+    warning = 'ALERTA: un precio demasiado bajo puede esconder deuda, prenda, choque fuerte, falla de motor/caja, kilometraje adulterado o urgencia no declarada.';
+    negotiationAdvice = 'No pagues reserva alta ni transfieras sin informe legal, revisión con escáner y verificación mecánica presencial.';
   } else if (diff <= -10) {
     category = 'Bajo el promedio de mercado';
-    summary = `El precio está aproximadamente ${abs.toFixed(1)}% bajo el valor de mercado.`;
-    warning = 'Conviene validar mantenciones, documentación, multas, historial de siniestros y revisión mecánica antes de cerrar.';
+    level = 'low';
+    summary = `El precio está aproximadamente ${abs.toFixed(1)}% bajo el promedio de mercado (${formatClp(Math.abs(diffAmount))} menos).`;
+    warning = 'Puede ser buena oportunidad, pero conviene validar mantenciones, documentación, multas, siniestros y estado real antes de cerrar.';
+    negotiationAdvice = 'Usa la diferencia a favor, pero confirma que el descuento tenga una explicación razonable.';
   } else if (diff < 10) {
-    category = 'Dentro del rango de mercado';
-    summary = `El precio está cerca del promedio de mercado, con una diferencia de ${diff.toFixed(1)}%.`;
-    warning = 'El precio no parece extremo; aun así, el estado real puede justificar subir o bajar la oferta.';
+    category = 'Cercano al precio promedio de mercado';
+    level = 'market';
+    summary = `El precio está dentro de un rango razonable respecto del mercado, con una diferencia de ${diff.toFixed(1)}% (${diffAmount >= 0 ? formatClp(diffAmount) + ' más' : formatClp(Math.abs(diffAmount)) + ' menos'}).`;
+    warning = 'El precio no parece extremo; el estado mecánico, neumáticos, mantenciones y documentación pueden justificar negociar.';
+    negotiationAdvice = 'Compara equipamiento, kilometraje y mantenciones para decidir si corresponde pagar el valor pedido.';
   } else if (diff < 25) {
     category = 'Sobre el promedio de mercado';
-    summary = `El precio está aproximadamente ${diff.toFixed(1)}% sobre el valor de mercado.`;
-    warning = 'Exige respaldo: mantenciones, neumáticos nuevos, único dueño, kilometraje bajo, accesorios o garantía.';
+    level = 'high';
+    summary = `El precio está aproximadamente ${diff.toFixed(1)}% sobre el promedio de mercado (${formatClp(diffAmount)} más).`;
+    warning = 'Exige respaldo concreto: mantenciones demostrables, neumáticos nuevos, bajo kilometraje real, único dueño, garantía o estado excepcional.';
+    negotiationAdvice = 'Negocia usando comparables de mercado y descuenta cualquier reparación pendiente.';
   } else {
     category = 'Muy por encima del mercado';
-    summary = `El precio está aproximadamente ${diff.toFixed(1)}% sobre el valor de mercado.`;
-    warning = 'Solo tendría sentido si el vehículo está excepcionalmente bien mantenido y documentado. Negocia o compara más unidades.';
+    level = 'critical-high';
+    summary = `El precio está aproximadamente ${diff.toFixed(1)}% sobre el promedio de mercado (${formatClp(diffAmount)} más).`;
+    warning = 'ALERTA: el precio solo se justificaría con estado excepcional y documentación impecable. Si no hay respaldo, el riesgo económico es alto.';
+    negotiationAdvice = 'Compara más unidades, pide justificación documentada y evita pagar sobreprecio por argumentos no verificables.';
   }
 
   return {
     category,
+    level,
     differencePercent: Number(diff.toFixed(1)),
+    differenceAmount: Math.round(diffAmount),
     summary,
-    warning
+    warning,
+    negotiationAdvice
   };
 }
 
@@ -197,12 +216,24 @@ function buildRuleBasedReport(fields, uploadedPhotos) {
   }
 
   if (priceAnalysis.differencePercent !== null) {
-    if (priceAnalysis.differencePercent <= -25) riskScore += 18;
-    else if (priceAnalysis.differencePercent <= -10) riskScore += 8;
-    else if (priceAnalysis.differencePercent >= 25) riskScore += 10;
-    else if (priceAnalysis.differencePercent >= 10) riskScore += 5;
+    if (priceAnalysis.differencePercent <= -25) {
+      riskScore += 18;
+      alerts.push(`${priceAnalysis.category}: ${priceAnalysis.warning}`);
+    } else if (priceAnalysis.differencePercent <= -10) {
+      riskScore += 8;
+      positives.push(`${priceAnalysis.category}: puede ser oportunidad si documentos y revisión mecánica respaldan el estado.`);
+    } else if (priceAnalysis.differencePercent >= 25) {
+      riskScore += 12;
+      alerts.push(`${priceAnalysis.category}: ${priceAnalysis.warning}`);
+    } else if (priceAnalysis.differencePercent >= 10) {
+      riskScore += 5;
+      alerts.push(`${priceAnalysis.category}: exige argumentos verificables para pagar más que el promedio.`);
+    } else {
+      positives.push('Precio cercano al promedio de mercado según los datos ingresados.');
+    }
   } else {
     riskScore += 8;
+    alerts.push('Faltan datos de precio de compra o precio de mercado para evaluar si la oferta conviene.');
   }
 
   if (concern.length > 10) {
@@ -335,6 +366,8 @@ Eres un asistente de preinspección automotriz para compradores de autos usados 
 No reemplazas a un mecánico. Debes ser prudente, claro y orientado a riesgos.
 Devuelve SOLO JSON válido con estas claves:
 verdict, riskScore, alerts, positives, photoObservations, priceOpinion, buyerConcernOpinion, questions, nextSteps, disclaimer.
+
+El priceOpinion debe analizar explícitamente si el precio de compra está muy por debajo, bajo promedio, cercano al promedio, sobre promedio o muy por encima del mercado. Si está muy por debajo o muy por encima, debe indicar una alerta clara y qué validar antes de pagar.
 
 Datos del vehículo:
 Marca: ${fields.brand || 'No informado'}

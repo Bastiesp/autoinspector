@@ -5,7 +5,7 @@ AutoInspector es una web app para generar un informe preliminar de compra de veh
 ## Funciones de esta versión
 
 - Sitio responsive tipo app premium.
-- Subida de fotos desde cámara o galería del celular.
+- Subida de fotos desde cámara o galería del celular, con mínimo 2 fotos por ítem obligatorio y libertad de usar ambas desde galería o ambas desde cámara.
 - Dos fotos por cada ítem de inspección.
 - Compresión de imágenes en el navegador antes de subirlas.
 - Cloudinary para guardar fotos comprimidas.
