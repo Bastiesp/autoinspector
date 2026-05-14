@@ -1,19 +1,167 @@
-const form = document.getElementById('inspectionForm');
-const submitBtn = document.getElementById('submitBtn');
-const resultSection = document.getElementById('resultado');
-const reportBox = document.getElementById('reportBox');
-const whatsappLink = document.getElementById('whatsappLink');
-const compressionStatus = document.getElementById('compressionStatus');
+'use strict';
 
-const MAX_ORIGINAL_MB = 12;
-const MAX_COMPRESSED_MB = 1.5;
-const MAX_WIDTH_OR_HEIGHT = 1400;
-const JPEG_QUALITY = 0.72;
+const requiredItems = [
+  { key: 'oilDipstick', label: 'Varilla de aceite', hint: 'Foto 1: aceite en la varilla. Foto 2: color/estado más cercano.' },
+  { key: 'tires', label: 'Neumáticos', hint: 'Foto 1: dibujo/profundidad. Foto 2: costado/fecha/desgaste irregular.' },
+  { key: 'engineBay', label: 'Motor / vano motor', hint: 'Foto 1: vista general. Foto 2: zonas con fugas, correas o mangueras.' }
+];
 
-const compressedFiles = new Map();
+const optionalItems = [
+  { key: 'coolant', label: 'Refrigerante / depósito', hint: 'Color, nivel, manchas, tapa y depósito.' },
+  { key: 'dashboardMileage', label: 'Tablero / kilometraje', hint: 'Kilometraje y luces de advertencia.' },
+  { key: 'bodywork', label: 'Carrocería / pintura', hint: 'Paneles, diferencias de color, golpes y uniones.' },
+  { key: 'interior', label: 'Interior', hint: 'Desgaste de volante, pedales, asientos y mandos.' },
+  { key: 'exhaust', label: 'Escape / humo', hint: 'Salida de escape, humo o residuos visibles.' },
+  { key: 'documents', label: 'Documentos / mantenciones', hint: 'Facturas, pauta de mantención o revisión técnica.' }
+];
 
-function escapeHtml(value) {
-  return String(value || '')
+const selectedFiles = new Map();
+let appConfig = {};
+
+const $ = (selector) => document.querySelector(selector);
+
+function showToast(message, timeout = 3600) {
+  const toast = $('#toast');
+  toast.textContent = message;
+  toast.classList.remove('hidden');
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.add('hidden'), timeout);
+}
+
+function createPhotoItem(item, required) {
+  const wrapper = document.createElement('article');
+  wrapper.className = 'photo-item';
+  wrapper.innerHTML = `
+    <div class="photo-item-head">
+      <div>
+        <h4>${item.label}</h4>
+        <small>${item.hint}</small>
+      </div>
+      <small>${required ? 'Obligatorio' : 'Opcional'} · 2 fotos</small>
+    </div>
+    <div class="photo-slots">
+      ${[1, 2].map((slot) => `
+        <div class="photo-slot" data-field="${item.key}_${slot}">
+          <div class="slot-title"><span>Toma ${slot}</span><span class="slot-status">Sin foto</span></div>
+          <div class="source-buttons">
+            <label>📷 Cámara
+              <input type="file" accept="image/*" capture="environment" data-field="${item.key}_${slot}" data-source="camera" ${required ? 'data-required="true"' : ''}>
+            </label>
+            <label>🖼️ Galería
+              <input type="file" accept="image/*" data-field="${item.key}_${slot}" data-source="gallery" ${required ? 'data-required="true"' : ''}>
+            </label>
+          </div>
+          <div class="preview" id="preview_${item.key}_${slot}">Sin imagen seleccionada</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  return wrapper;
+}
+
+function renderPhotoSections() {
+  const requiredContainer = $('#requiredPhotoItems');
+  const optionalContainer = $('#optionalPhotoItems');
+  requiredItems.forEach((item) => requiredContainer.appendChild(createPhotoItem(item, true)));
+  optionalItems.forEach((item) => optionalContainer.appendChild(createPhotoItem(item, false)));
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+async function compressImage(file, options = {}) {
+  const maxOriginalMb = 12;
+  const maxSide = options.maxSide || 1400;
+  const initialQuality = options.quality || 0.82;
+  const targetBytes = (options.targetMb || 1.5) * 1024 * 1024;
+
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Solo se permiten imágenes.');
+  }
+
+  if (file.size > maxOriginalMb * 1024 * 1024) {
+    throw new Error(`La foto supera ${maxOriginalMb} MB. Elige una imagen más liviana.`);
+  }
+
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const width = Math.round(bitmap.width * scale);
+  const height = Math.round(bitmap.height * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.drawImage(bitmap, 0, 0, width, height);
+
+  let quality = initialQuality;
+  let blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+  while (blob && blob.size > targetBytes && quality > 0.48) {
+    quality -= 0.08;
+    blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+  }
+
+  if (!blob) throw new Error('No se pudo procesar la imagen.');
+
+  const safeName = file.name.replace(/\.[^.]+$/, '') || 'foto';
+  return new File([blob], `${safeName}-autoinspector.jpg`, { type: 'image/jpeg' });
+}
+
+async function handleFileChange(event) {
+  const input = event.target;
+  const file = input.files && input.files[0];
+  if (!file) return;
+
+  const field = input.dataset.field;
+  const slot = document.querySelector(`.photo-slot[data-field="${field}"]`);
+  const status = slot.querySelector('.slot-status');
+  const preview = $(`#preview_${field}`);
+
+  try {
+    status.textContent = 'Comprimiendo...';
+    preview.textContent = 'Optimizando imagen para subir menos peso...';
+    const compressed = await compressImage(file);
+    selectedFiles.set(field, compressed);
+
+    const url = URL.createObjectURL(compressed);
+    preview.innerHTML = `<img src="${url}" alt="Vista previa ${field}">`;
+    preview.classList.add('done');
+    status.textContent = `${(compressed.size / 1024 / 1024).toFixed(2)} MB`;
+    showToast('Foto agregada y comprimida correctamente.');
+  } catch (error) {
+    selectedFiles.delete(field);
+    input.value = '';
+    status.textContent = 'Sin foto';
+    preview.textContent = error.message;
+    showToast(error.message, 5200);
+  }
+}
+
+function appendFilesToFormData(formData) {
+  for (const [field, file] of selectedFiles.entries()) {
+    formData.append(field, file, file.name);
+  }
+}
+
+function validateRequiredPhotos() {
+  const missing = [];
+  for (const item of requiredItems) {
+    for (const slot of [1, 2]) {
+      const field = `${item.key}_${slot}`;
+      if (!selectedFiles.has(field)) missing.push(`${item.label} toma ${slot}`);
+    }
+  }
+  return missing;
+}
+
+function listToHtml(list, fallback = 'Sin información suficiente.') {
+  if (!Array.isArray(list) || !list.length) return `<li>${fallback}</li>`;
+  return list.map((item) => `<li>${escapeHtml(String(item))}</li>`).join('');
+}
+
+function escapeHtml(str) {
+  return str
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -21,271 +169,138 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-function bytesToMb(bytes) {
-  return (bytes / 1024 / 1024).toFixed(2);
-}
+function renderReport(payload) {
+  const { report, photos, contact, inspectionId } = payload;
+  $('#resultSection').classList.remove('hidden');
+  $('#reportVerdict').textContent = report.verdict || 'Informe generado';
+  $('#reportMode').textContent = `${report.mode || 'Análisis'} · ID ${inspectionId}`;
+  $('#riskScore').textContent = Math.round(report.riskScore || 0);
 
-function setCompressionStatus(message, type = 'info') {
-  if (!compressionStatus) return;
-  compressionStatus.textContent = message;
-  compressionStatus.className = `compression-status ${type}`;
-}
+  const price = report.prices?.analysis || {};
+  $('#priceCategory').textContent = price.category || 'No evaluado';
+  $('#priceSummary').textContent = `${price.summary || ''} ${price.warning || ''}`.trim();
 
-function list(items) {
-  if (!items || !items.length) return '<p>No se registran elementos en esta sección.</p>';
-  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
-}
+  const concernText = report.buyerConcernOpinion || report.buyerConcern || 'No informado';
+  $('#concernSummary').textContent = concernText;
 
-function renderPhotoObservations(items) {
-  if (!items || !items.length) return '';
-  return `
-    <div class="report-card">
-      <h3>Observaciones de fotos</h3>
-      <ul>
-        ${items.map((item) => `
-          <li>
-            <strong>${escapeHtml(item.item)}:</strong>
-            ${escapeHtml(item.observation)}
-            <em>(${escapeHtml(item.risk)})</em>
-          </li>
-        `).join('')}
-      </ul>
-    </div>
-  `;
-}
+  $('#alertsList').innerHTML = listToHtml(report.alerts);
+  $('#positivesList').innerHTML = listToHtml(report.positives);
+  $('#photoObservations').innerHTML = listToHtml(report.photoObservations, 'La IA no agregó observaciones específicas de fotos.');
+  $('#questionsList').innerHTML = listToHtml(report.questions);
+  $('#nextStepsList').innerHTML = listToHtml(report.nextSteps);
+  $('#disclaimer').textContent = report.disclaimer || 'Este informe no reemplaza una revisión presencial de un mecánico profesional.';
 
-function renderUploadedPhotos(photos) {
-  if (!photos || !photos.length) return '';
-
-  return `
-    <div class="report-card">
-      <h3>Fotos procesadas</h3>
-      <div class="photo-results">
-        ${photos.map((photo) => `
-          <div class="photo-result-item">
-            ${photo.secure_url ? `<img src="${escapeHtml(photo.secure_url)}" alt="${escapeHtml(photo.label || photo.fieldname)}" />` : ''}
-            <div>
-              <strong>${escapeHtml(photo.label || photo.fieldname)}</strong>
-              <small>${escapeHtml(bytesToMb(photo.bytes || photo.size || 0))} MB ${photo.secure_url ? '· guardada en Cloudinary' : '· no guardada permanentemente'}</small>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `;
-}
-
-function renderReport(data) {
-  const report = data.report;
-  const vehicle = data.vehicle;
-  const score = Number(report.riskScore || 0);
-  const contactWhatsapp = report.contact?.whatsapp || '';
-
-  const whatsappText = encodeURIComponent(
-    `Hola, quiero coordinar una revisión profesional para este vehículo: ${vehicle.brand} ${vehicle.model} ${vehicle.year}, ${vehicle.mileage} km.`
-  );
-
-  if (contactWhatsapp) {
-    whatsappLink.href = `https://wa.me/${contactWhatsapp}?text=${whatsappText}`;
-    whatsappLink.style.display = 'inline-flex';
-  } else {
-    whatsappLink.href = '#';
-    whatsappLink.style.display = 'none';
+  const gallery = $('#uploadedGallery');
+  gallery.innerHTML = '';
+  for (const photo of photos || []) {
+    if (!photo.cloudinaryUrl) continue;
+    const card = document.createElement('div');
+    card.className = 'gallery-card';
+    card.innerHTML = `
+      <img src="${photo.cloudinaryUrl}" alt="${escapeHtml(photo.itemLabel)}">
+      <span>${escapeHtml(photo.itemLabel)} · toma ${photo.slot}</span>
+    `;
+    gallery.appendChild(card);
   }
 
-  reportBox.innerHTML = `
-    <div class="report-header">
-      <h2>${escapeHtml(report.verdict)}</h2>
-      <p><strong>Vehículo:</strong> ${escapeHtml(vehicle.brand)} ${escapeHtml(vehicle.model)} ${escapeHtml(vehicle.year)} · ${escapeHtml(vehicle.mileage)} km</p>
-      <p><strong>Modo de análisis:</strong> ${report.mode === 'ai' ? 'IA + reglas preventivas' : 'Reglas preventivas'}</p>
-      <p><strong>Almacenamiento de fotos:</strong> ${data.storage === 'cloudinary' ? 'Cloudinary' : 'Temporal, no permanente'}</p>
-      <p><strong>Puntaje de riesgo:</strong> ${score}/100</p>
-      <div class="score">
-        <div class="score-bar" style="width:${Math.min(Math.max(score, 0), 100)}%"></div>
-      </div>
-      ${report.aiWarning ? `<p><strong>Nota:</strong> ${escapeHtml(report.aiWarning)}</p>` : ''}
-    </div>
-
-    <div class="report-grid">
-      <div class="report-card alert">
-        <h3>Alertas</h3>
-        ${list(report.alerts)}
-      </div>
-
-      <div class="report-card positive">
-        <h3>Señales positivas</h3>
-        ${list(report.positives)}
-      </div>
-
-      <div class="report-card">
-        <h3>Preguntas para el vendedor</h3>
-        ${list(report.questions)}
-      </div>
-
-      <div class="report-card">
-        <h3>Próximos pasos</h3>
-        ${list(report.nextSteps)}
-      </div>
-
-      ${renderPhotoObservations(report.photoObservations)}
-      ${renderUploadedPhotos(data.photos)}
-
-      <div class="report-card">
-        <h3>Recomendación profesional</h3>
-        <p>${escapeHtml(report.professionalRecommendation)}</p>
-      </div>
-    </div>
-
-    <div class="disclaimer">
-      ${escapeHtml(data.disclaimer)}
-    </div>
-  `;
-
-  resultSection.classList.remove('hidden');
-  resultSection.scrollIntoView({ behavior: 'smooth' });
-}
-
-function fileToImage(file) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('No se pudo leer la imagen.'));
-    };
-
-    img.src = url;
-  });
-}
-
-function canvasToBlob(canvas, quality) {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
-  });
-}
-
-async function compressImageFile(file, inputName) {
-  if (!file) return null;
-
-  if (!file.type.startsWith('image/')) {
-    throw new Error('Solo se permiten imágenes.');
+  if (!gallery.children.length) {
+    gallery.innerHTML = '<p>No hay galería persistente porque Cloudinary no está configurado. El informe se generó con las fotos recibidas temporalmente.</p>';
   }
 
-  if (file.size > MAX_ORIGINAL_MB * 1024 * 1024) {
-    throw new Error(`La foto original "${file.name}" pesa ${bytesToMb(file.size)} MB. El máximo antes de comprimir es ${MAX_ORIGINAL_MB} MB.`);
-  }
-
-  const img = await fileToImage(file);
-  const scale = Math.min(1, MAX_WIDTH_OR_HEIGHT / Math.max(img.width, img.height));
-  const width = Math.round(img.width * scale);
-  const height = Math.round(img.height * scale);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, width, height);
-
-  let quality = JPEG_QUALITY;
-  let blob = await canvasToBlob(canvas, quality);
-
-  while (blob && blob.size > MAX_COMPRESSED_MB * 1024 * 1024 && quality > 0.45) {
-    quality -= 0.08;
-    blob = await canvasToBlob(canvas, quality);
-  }
-
-  if (!blob) {
-    throw new Error('No se pudo comprimir la imagen.');
-  }
-
-  const newName = `${inputName || 'foto'}-${Date.now()}.jpg`;
-  return new File([blob], newName, {
-    type: 'image/jpeg',
-    lastModified: Date.now()
-  });
+  configureContactButtons(contact, report, inspectionId);
+  $('#resultSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-async function processInputFile(input) {
-  const file = input.files?.[0];
-  const box = input.closest('.photo-box');
-  const status = box?.querySelector('.photo-status');
+function buildContactText(report, inspectionId) {
+  const vehicle = report.vehicle || {};
+  return [
+    'Hola, quiero agendar una revisión mecánica presencial.',
+    `Informe AutoInspector: ${inspectionId || 'sin ID'}`,
+    `Vehículo: ${vehicle.brand || ''} ${vehicle.model || ''} ${vehicle.year || ''}`.trim(),
+    `Kilometraje: ${vehicle.mileage || 'No informado'}`,
+    `Veredicto preliminar: ${report.verdict || 'No informado'}`,
+    `Riesgo: ${report.riskScore ?? 'No informado'}/100`
+  ].join('\n');
+}
 
-  compressedFiles.delete(input.name);
+function configureContactButtons(contact = {}, report = {}, inspectionId = '') {
+  const whatsapp = contact.whatsapp || appConfig.contactWhatsapp || '';
+  const email = contact.email || appConfig.contactEmail || '';
+  const text = buildContactText(report, inspectionId);
 
-  if (!file) {
-    if (status) status.textContent = '';
+  const whatsappUrl = whatsapp
+    ? `https://wa.me/${String(whatsapp).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(text)}`
+    : '#';
+  const emailUrl = email
+    ? `mailto:${email}?subject=${encodeURIComponent('Revisión presencial AutoInspector')}&body=${encodeURIComponent(text)}`
+    : '#';
+
+  for (const id of ['whatsappBtn', 'topContactBtn', 'reportContactBtn']) {
+    const el = $(`#${id}`);
+    if (el) el.href = whatsappUrl;
+  }
+  const emailBtn = $('#emailBtn');
+  if (emailBtn) emailBtn.href = emailUrl;
+}
+
+async function handleSubmit(event) {
+  event.preventDefault();
+  const missing = validateRequiredPhotos();
+  if (missing.length) {
+    showToast(`Faltan fotos obligatorias: ${missing.join(', ')}`, 6200);
     return;
   }
 
-  try {
-    if (status) status.textContent = 'Comprimiendo foto...';
-    setCompressionStatus('Comprimiendo imagen en el navegador antes de subirla...', 'info');
-
-    const compressed = await compressImageFile(file, input.name);
-    compressedFiles.set(input.name, compressed);
-
-    if (status) {
-      status.textContent = `Lista: ${bytesToMb(file.size)} MB → ${bytesToMb(compressed.size)} MB`;
-    }
-
-    setCompressionStatus('Fotos listas. Se subirán comprimidas para ahorrar espacio en Cloudinary.', 'success');
-  } catch (error) {
-    input.value = '';
-    compressedFiles.delete(input.name);
-    if (status) status.textContent = 'Error: ' + error.message;
-    setCompressionStatus(error.message, 'error');
-    alert(error.message);
-  }
-}
-
-document.querySelectorAll('input[type="file"][accept^="image"]').forEach((input) => {
-  input.addEventListener('change', () => processInputFile(input));
-});
-
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
+  const form = event.currentTarget;
+  const submitBtn = $('#submitBtn');
+  const formData = new FormData(form);
+  appendFilesToFormData(formData);
 
   submitBtn.disabled = true;
-  submitBtn.textContent = 'Generando informe...';
-  setCompressionStatus('Preparando fotos comprimidas y enviando inspección...', 'info');
+  submitBtn.textContent = 'Analizando...';
+  showToast('Subiendo fotos comprimidas y generando informe.');
 
   try {
-    const formData = new FormData(form);
-
-    document.querySelectorAll('input[type="file"][accept^="image"]').forEach((input) => {
-      formData.delete(input.name);
-      const compressed = compressedFiles.get(input.name);
-      if (compressed) {
-        formData.append(input.name, compressed, compressed.name);
-      }
-    });
-
     const response = await fetch('/api/inspect', {
       method: 'POST',
       body: formData
     });
-
     const data = await response.json();
-
-    if (!response.ok) {
-      const missing = data.missingRequiredPhotos?.join(', ');
-      throw new Error(data.error + (missing ? `: ${missing}` : ''));
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || 'No fue posible generar el informe.');
     }
-
-    setCompressionStatus('Informe generado correctamente.', 'success');
     renderReport(data);
+    showToast('Informe generado correctamente.');
   } catch (error) {
-    setCompressionStatus(error.message || 'No se pudo generar el informe.', 'error');
-    alert(error.message || 'No se pudo generar el informe');
+    showToast(error.message, 7000);
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Generar informe';
   }
-});
+}
+
+async function loadConfig() {
+  try {
+    const response = await fetch('/api/config');
+    appConfig = await response.json();
+    configureContactButtons({
+      whatsapp: appConfig.contactWhatsapp,
+      email: appConfig.contactEmail
+    }, { verdict: 'Quiero información de revisión presencial' }, 'consulta');
+  } catch (_error) {
+    appConfig = {};
+  }
+}
+
+function init() {
+  renderPhotoSections();
+  document.addEventListener('change', (event) => {
+    if (event.target.matches('input[type="file"][data-field]')) {
+      handleFileChange(event);
+    }
+  });
+  $('#inspectionForm').addEventListener('submit', handleSubmit);
+  loadConfig();
+}
+
+init();
