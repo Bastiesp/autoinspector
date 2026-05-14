@@ -1,314 +1,469 @@
-'use strict';
-
 require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const helmet = require('helmet');
 const multer = require('multer');
-const rateLimit = require('express-rate-limit');
-const path = require('path');
+const { v2: cloudinary } = require('cloudinary');
+const OpenAI = require('openai');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 3);
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
-app.set('trust proxy', 1);
-app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+app.use(express.static('public'));
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 40,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { ok: false, error: 'Demasiadas solicitudes. Intenta nuevamente en unos minutos.' }
-});
+const cloudinaryConfigured = Boolean(
+  process.env.CLOUDINARY_CLOUD_NAME &&
+  process.env.CLOUDINARY_API_KEY &&
+  process.env.CLOUDINARY_API_SECRET
+);
 
-app.use('/api/', limiter);
+if (cloudinaryConfigured) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true
+  });
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 7 * 1024 * 1024,
-    files: 8
+    fileSize: MAX_UPLOAD_BYTES,
+    files: 12
   },
-  fileFilter: (_req, file, cb) => {
+  fileFilter: (req, file, cb) => {
     if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-      return cb(new Error('Solo se permiten imágenes.'));
+      return cb(new Error('Solo se permiten imágenes'));
     }
     cb(null, true);
   }
 });
 
-const REQUIRED_ITEMS = [
-  { field: 'oilDipstick', label: 'Varilla de aceite' },
-  { field: 'tires', label: 'Neumáticos' },
-  { field: 'engineBay', label: 'Motor / vano motor' }
-];
+const requiredPhotoFields = ['oilDipstick', 'tires', 'engine'];
 
-const OPTIONAL_ITEMS = [
-  { field: 'coolant', label: 'Refrigerante / depósito' },
-  { field: 'dashboard', label: 'Tablero / kilometraje' },
-  { field: 'bodywork', label: 'Carrocería / pintura' },
-  { field: 'interior', label: 'Interior' },
-  { field: 'exhaust', label: 'Escape / humo visible' }
-];
+const photoLabels = {
+  oilDipstick: 'Varilla de aceite',
+  tires: 'Neumáticos',
+  engine: 'Motor',
+  coolant: 'Refrigerante',
+  dashboard: 'Tablero / kilometraje',
+  bodywork: 'Carrocería',
+  interior: 'Interior',
+  exhaust: 'Escape / humo'
+};
 
-app.get('/api/health', (_req, res) => {
-  res.json({
-    ok: true,
-    app: 'AutoInspector',
-    version: '1.0.0',
-    aiEnabled: Boolean(OPENAI_API_KEY),
-    requiredPhotos: REQUIRED_ITEMS.map(x => x.label)
-  });
-});
+function safeNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
 
-app.get('/api/config', (_req, res) => {
-  res.json({
-    ok: true,
-    aiEnabled: Boolean(OPENAI_API_KEY),
-    contactWhatsapp: process.env.CONTACT_WHATSAPP || '',
-    contactEmail: process.env.CONTACT_EMAIL || ''
-  });
-});
+function parseBoolean(value) {
+  return value === 'true' || value === true || value === 'on';
+}
 
-app.post('/api/inspect', upload.fields([...REQUIRED_ITEMS, ...OPTIONAL_ITEMS].map(item => ({ name: item.field, maxCount: 1 }))), async (req, res) => {
-  try {
-    const files = req.files || {};
-    const missing = REQUIRED_ITEMS.filter(item => !files[item.field]?.[0]).map(item => item.label);
+function sanitizeFolderPart(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase()
+    .slice(0, 60) || 'vehiculo';
+}
 
-    if (missing.length) {
-      return res.status(400).json({
-        ok: false,
-        error: `Faltan fotos obligatorias: ${missing.join(', ')}.`
-      });
+function normalizeVehicle(body) {
+  return {
+    brand: String(body.brand || '').trim(),
+    model: String(body.model || '').trim(),
+    year: String(body.year || '').trim(),
+    mileage: String(body.mileage || '').trim(),
+    fuel: String(body.fuel || '').trim(),
+    transmission: String(body.transmission || '').trim(),
+    price: String(body.price || '').trim(),
+    sellerNotes: String(body.sellerNotes || '').trim(),
+    warningLights: body.warningLights,
+    oilLeaks: body.oilLeaks,
+    overheating: body.overheating,
+    accidentHistory: body.accidentHistory
+  };
+}
+
+function buildRuleBasedReport(vehicle, photosSummary = []) {
+  const alerts = [];
+  const positives = [];
+  const questions = [];
+  const nextSteps = [];
+
+  const year = safeNumber(vehicle.year);
+  const mileage = safeNumber(vehicle.mileage);
+  const currentYear = new Date().getFullYear();
+  const age = year ? Math.max(currentYear - year, 0) : null;
+  const kmPerYear = age && age > 0 ? Math.round(mileage / age) : null;
+
+  let riskScore = 35;
+
+  if (!vehicle.brand || !vehicle.model || !vehicle.year || !vehicle.mileage) {
+    alerts.push('Faltan datos básicos del vehículo. El informe queda incompleto.');
+    riskScore += 10;
+  }
+
+  if (mileage > 180000) {
+    alerts.push('Kilometraje alto. Se recomienda revisar mantenimiento mayor, consumo de aceite, caja, suspensión y fugas.');
+    riskScore += 18;
+  } else if (mileage > 100000) {
+    alerts.push('Kilometraje medio/alto. Conviene pedir historial de mantenciones y revisar desgaste general.');
+    riskScore += 9;
+  } else if (mileage > 0) {
+    positives.push('Kilometraje dentro de un rango más favorable, siempre que sea coherente con el año y el desgaste visible.');
+    riskScore -= 4;
+  }
+
+  if (kmPerYear && kmPerYear > 25000) {
+    alerts.push(`Uso anual alto aproximado: ${kmPerYear.toLocaleString('es-CL')} km/año.`);
+    riskScore += 10;
+  }
+
+  if (parseBoolean(vehicle.warningLights)) {
+    alerts.push('El vendedor indica luces de advertencia encendidas. Esto requiere escáner antes de comprar.');
+    riskScore += 18;
+  }
+
+  if (parseBoolean(vehicle.oilLeaks)) {
+    alerts.push('Se reportan o sospechan fugas de aceite. Revisar motor por abajo y alrededor de tapa de válvulas, cárter y retenes.');
+    riskScore += 14;
+  }
+
+  if (parseBoolean(vehicle.overheating)) {
+    alerts.push('Hay antecedente o sospecha de temperatura alta. Revisar sistema de refrigeración, tapa, termostato, electroventilador y posible presión excesiva.');
+    riskScore += 20;
+  }
+
+  if (parseBoolean(vehicle.accidentHistory)) {
+    alerts.push('Existe antecedente o sospecha de choque. Revisar estructura, descuadres, soldaduras, pintura y airbags.');
+    riskScore += 15;
+  }
+
+  const hasAllRequired = requiredPhotoFields.every((field) =>
+    photosSummary.some((photo) => photo.fieldname === field)
+  );
+
+  if (hasAllRequired) {
+    positives.push('Se adjuntaron las fotos mínimas obligatorias para una revisión preliminar.');
+    riskScore -= 5;
+  } else {
+    alerts.push('No se adjuntaron todas las fotos mínimas: varilla de aceite, neumáticos y motor.');
+    riskScore += 15;
+  }
+
+  if (photosSummary.some((p) => p.fieldname === 'dashboard')) {
+    positives.push('Se adjuntó foto del tablero/kilometraje, útil para revisar testigos y coherencia del kilometraje.');
+  }
+
+  if (photosSummary.some((p) => p.fieldname === 'coolant')) {
+    positives.push('Se adjuntó foto del refrigerante, útil para detectar señales de óxido, mezcla de fluidos o nivel bajo.');
+  }
+
+  if (vehicle.transmission === 'automatic') {
+    questions.push('¿La caja automática realiza los cambios suaves en frío y en caliente?');
+    questions.push('¿Cuándo fue el último cambio de aceite de caja y con qué especificación?');
+  }
+
+  questions.push('¿Tiene historial de mantenciones con fechas y kilometrajes?');
+  questions.push('¿El kilometraje se puede respaldar con revisiones técnicas, boletas o historial de taller?');
+  questions.push('¿Ha tenido choques, reparaciones estructurales o activación de airbags?');
+  questions.push('¿Consume aceite entre mantenciones?');
+  questions.push('¿Ha tenido problemas de temperatura o pérdida de refrigerante?');
+  questions.push('¿Está al día en documentación, multas, permiso de circulación y revisión técnica?');
+  questions.push('¿Acepta revisión con escáner y revisión presencial antes de concretar la compra?');
+
+  nextSteps.push('Solicitar video del arranque en frío.');
+  nextSteps.push('Pedir foto del tablero con motor encendido para ver testigos.');
+  nextSteps.push('Comparar desgaste de volante, pedales, asiento y neumáticos con el kilometraje declarado.');
+  nextSteps.push('Hacer prueba de manejo y verificar frenado, dirección, suspensión, caja y temperatura.');
+  nextSteps.push('Antes de pagar o reservar, realizar revisión presencial con mecánico y escáner.');
+
+  riskScore = Math.min(Math.max(riskScore, 0), 100);
+
+  let verdict = 'Riesgo medio: continuar solo con más antecedentes y revisión presencial.';
+  if (riskScore < 30) verdict = 'Riesgo bajo preliminar: se ve favorable, pero debe confirmarse presencialmente.';
+  if (riskScore >= 65) verdict = 'Riesgo alto: no se recomienda comprar sin revisión mecánica completa.';
+
+  return {
+    mode: 'rules',
+    verdict,
+    riskScore,
+    alerts,
+    positives,
+    questions,
+    nextSteps,
+    professionalRecommendation:
+      'Este informe no reemplaza una revisión mecánica. La recomendación final es coordinar una inspección presencial profesional antes de comprar.',
+    contact: {
+      whatsapp: process.env.CONTACT_WHATSAPP || '',
+      email: process.env.CONTACT_EMAIL || ''
     }
+  };
+}
 
-    const vehicle = normalizeVehicle(req.body || {});
-    if (!vehicle.brand || !vehicle.model || !vehicle.year || !vehicle.km) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Completa marca, modelo, año y kilometraje.'
-      });
-    }
+function photoToBase64DataUrl(file) {
+  return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+}
 
-    const photos = buildPhotoPayload(files);
-    const baseAnalysis = ruleBasedAnalysis(vehicle, photos);
+function uploadBufferToCloudinary(file, vehicle) {
+  if (!cloudinaryConfigured) return Promise.resolve(null);
 
-    let analysis = baseAnalysis;
-    let source = 'reglas';
+  const baseFolder = process.env.CLOUDINARY_FOLDER || 'autoinspector/inspections';
+  const vehicleFolder = `${sanitizeFolderPart(vehicle.brand)}-${sanitizeFolderPart(vehicle.model)}-${sanitizeFolderPart(vehicle.year)}`;
+  const dateFolder = new Date().toISOString().slice(0, 10);
+  const folder = `${baseFolder}/${dateFolder}/${vehicleFolder}`;
 
-    if (OPENAI_API_KEY) {
-      try {
-        analysis = await analyzeWithOpenAI(vehicle, photos, baseAnalysis);
-        source = 'ia';
-      } catch (aiError) {
-        console.error('IA no disponible, usando análisis por reglas:', aiError.message);
-        analysis = {
-          ...baseAnalysis,
-          warning: 'La IA no respondió correctamente. Se entregó un análisis preventivo basado en reglas.'
-        };
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: 'image',
+        public_id: `${file.fieldname}-${Date.now()}`,
+        overwrite: false,
+        tags: ['autoinspector', 'inspection', file.fieldname],
+        context: {
+          item: photoLabels[file.fieldname] || file.fieldname,
+          brand: vehicle.brand || '',
+          model: vehicle.model || '',
+          year: vehicle.year || '',
+          mileage: vehicle.mileage || ''
+        }
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve({
+          fieldname: file.fieldname,
+          label: photoLabels[file.fieldname] || file.fieldname,
+          originalname: file.originalname,
+          mimetype: file.mimetype,
+          size: file.size,
+          secure_url: result.secure_url,
+          public_id: result.public_id,
+          width: result.width,
+          height: result.height,
+          bytes: result.bytes,
+          format: result.format
+        });
       }
+    );
+
+    stream.end(file.buffer);
+  });
+}
+
+async function uploadPhotos(files, vehicle) {
+  const uploaded = [];
+
+  for (const file of files) {
+    const cloudinaryPhoto = await uploadBufferToCloudinary(file, vehicle);
+    if (cloudinaryPhoto) {
+      uploaded.push(cloudinaryPhoto);
+    } else {
+      uploaded.push({
+        fieldname: file.fieldname,
+        label: photoLabels[file.fieldname] || file.fieldname,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size
+      });
+    }
+  }
+
+  return uploaded;
+}
+
+async function analyzeWithOpenAI(vehicle, files, uploadedPhotos, baseReport) {
+  if (!process.env.OPENAI_API_KEY) return null;
+
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const model = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+
+  const photosForPrompt = uploadedPhotos.map((photo) => ({
+    item: photo.label || photo.fieldname,
+    url: photo.secure_url || null,
+    size: photo.size || photo.bytes || null
+  }));
+
+  const imageContent = uploadedPhotos
+    .filter((photo) => photo.secure_url)
+    .slice(0, 8)
+    .map((photo) => ({
+      type: 'image_url',
+      image_url: { url: photo.secure_url }
+    }));
+
+  if (imageContent.length === 0) {
+    imageContent.push(
+      ...files.slice(0, 8).map((file) => ({
+        type: 'image_url',
+        image_url: { url: photoToBase64DataUrl(file) }
+      }))
+    );
+  }
+
+  const prompt = `
+Eres un asistente experto en inspección preliminar de autos usados en Chile.
+Analiza los datos y fotos entregadas. No inventes datos que no se ven.
+Tu objetivo es orientar al comprador, detectar riesgos y sugerir preguntas.
+Nunca digas que esto reemplaza a un mecánico.
+
+Datos del vehículo:
+${JSON.stringify(vehicle, null, 2)}
+
+Fotos recibidas:
+${JSON.stringify(photosForPrompt, null, 2)}
+
+Informe base por reglas:
+${JSON.stringify(baseReport, null, 2)}
+
+Devuelve SOLO JSON válido con esta estructura:
+{
+  "mode": "ai",
+  "verdict": "texto breve",
+  "riskScore": numero_0_a_100,
+  "alerts": ["..."],
+  "positives": ["..."],
+  "questions": ["..."],
+  "nextSteps": ["..."],
+  "photoObservations": [
+    {
+      "item": "varilla/neumaticos/motor/etc",
+      "observation": "observación prudente basada en imagen",
+      "risk": "bajo/medio/alto/no concluyente"
+    }
+  ],
+  "professionalRecommendation": "texto"
+}
+`;
+
+  const response = await client.chat.completions.create({
+    model,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          ...imageContent
+        ]
+      }
+    ],
+    temperature: 0.2
+  });
+
+  const raw = response.choices?.[0]?.message?.content || '{}';
+  const parsed = JSON.parse(raw);
+
+  return {
+    ...parsed,
+    contact: {
+      whatsapp: process.env.CONTACT_WHATSAPP || '',
+      email: process.env.CONTACT_EMAIL || ''
+    }
+  };
+}
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    name: 'AutoInspector',
+    aiEnabled: Boolean(process.env.OPENAI_API_KEY),
+    cloudinaryEnabled: cloudinaryConfigured,
+    maxUploadMb: MAX_UPLOAD_MB,
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.post('/api/inspect', upload.any(), async (req, res) => {
+  try {
+    const vehicle = normalizeVehicle(req.body);
+    const files = req.files || [];
+
+    const receivedPhotos = files.map((file) => ({
+      fieldname: file.fieldname,
+      label: photoLabels[file.fieldname] || file.fieldname,
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size
+    }));
+
+    const missingRequiredPhotos = requiredPhotoFields.filter(
+      (field) => !receivedPhotos.some((photo) => photo.fieldname === field)
+    );
+
+    if (missingRequiredPhotos.length > 0) {
+      return res.status(400).json({
+        error: 'Faltan fotos obligatorias',
+        missingRequiredPhotos: missingRequiredPhotos.map((field) => photoLabels[field] || field)
+      });
+    }
+
+    const uploadedPhotos = await uploadPhotos(files, vehicle);
+    const baseReport = buildRuleBasedReport(vehicle, uploadedPhotos);
+
+    let finalReport = baseReport;
+
+    try {
+      const aiReport = await analyzeWithOpenAI(vehicle, files, uploadedPhotos, baseReport);
+      if (aiReport) finalReport = aiReport;
+    } catch (aiError) {
+      console.error('Error IA, usando reglas:', aiError.message);
+      finalReport = {
+        ...baseReport,
+        aiWarning:
+          'No se pudo completar el análisis con IA. Se generó un informe preliminar por reglas.'
+      };
     }
 
     res.json({
       ok: true,
-      source,
       vehicle,
-      analysis,
-      disclaimer: 'Este informe es una orientación inicial y no reemplaza una inspección presencial de un mecánico profesional.'
+      photos: uploadedPhotos,
+      storage: cloudinaryConfigured ? 'cloudinary' : 'temporary-memory',
+      report: finalReport,
+      disclaimer:
+        'AutoInspector entrega una orientación preliminar y no reemplaza la revisión de un mecánico profesional.'
     });
-  } catch (err) {
-    console.error('POST /api/inspect error:', err);
-    const message = err.message || 'Error del servidor.';
-    res.status(500).json({ ok: false, error: message });
+  } catch (error) {
+    console.error('POST /api/inspect error:', error);
+    res.status(500).json({
+      error: 'Error generando informe',
+      details: error.message
+    });
   }
 });
 
-function normalizeVehicle(body) {
-  const year = Number(body.year || 0);
-  const km = Number(String(body.km || '').replace(/[^0-9]/g, ''));
-  const price = Number(String(body.price || '').replace(/[^0-9]/g, '')) || null;
+app.use((err, req, res, next) => {
+  console.error('Middleware error:', err);
 
-  return {
-    brand: clean(body.brand),
-    model: clean(body.model),
-    year,
-    km,
-    price,
-    fuel: clean(body.fuel),
-    transmission: clean(body.transmission),
-    sellerNotes: clean(body.sellerNotes),
-    buyerQuestions: clean(body.buyerQuestions)
-  };
-}
-
-function clean(value) {
-  return String(value || '').trim().slice(0, 1200);
-}
-
-function buildPhotoPayload(files) {
-  const allItems = [...REQUIRED_ITEMS, ...OPTIONAL_ITEMS];
-  return allItems
-    .filter(item => files[item.field]?.[0])
-    .map(item => {
-      const file = files[item.field][0];
-      return {
-        field: item.field,
-        label: item.label,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        dataUrl: `data:${file.mimetype};base64,${file.buffer.toString('base64')}`
-      };
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({
+      error: `Una foto supera el máximo permitido por el servidor (${MAX_UPLOAD_MB} MB). Comprímela o sube una imagen más liviana.`
     });
-}
-
-function ruleBasedAnalysis(vehicle, photos) {
-  const age = Math.max(0, new Date().getFullYear() - vehicle.year);
-  const expectedKmLow = age * 10000;
-  const expectedKmHigh = age * 22000;
-  let riskScore = 35;
-  const redFlags = [];
-  const positiveSignals = [];
-  const questions = [];
-  const nextSteps = [];
-
-  if (vehicle.km > expectedKmHigh + 30000) {
-    riskScore += 22;
-    redFlags.push('Kilometraje alto para el año declarado. Conviene revisar historial de mantenciones y desgaste general.');
-  } else if (vehicle.km < Math.max(15000, expectedKmLow - 25000) && age > 4) {
-    riskScore += 14;
-    redFlags.push('Kilometraje llamativamente bajo para la antigüedad. Verificar historial, revisiones técnicas y posible manipulación de odómetro.');
-  } else {
-    riskScore -= 7;
-    positiveSignals.push('Kilometraje relativamente coherente con el año, sujeto a validación documental.');
   }
 
-  if (age >= 10) {
-    riskScore += 12;
-    redFlags.push('Vehículo con más de 10 años: revisar fugas, suspensión, refrigeración, frenos y corrosión.');
+  if (err && err.code === 'LIMIT_FILE_COUNT') {
+    return res.status(400).json({ error: 'Se superó el máximo de fotos permitido.' });
   }
 
-  if (vehicle.price) {
-    positiveSignals.push('El precio fue informado, por lo que se puede comparar luego contra mercado y estado real.');
-  }
-
-  const labels = photos.map(p => p.label).join(', ');
-  positiveSignals.push(`Fotos recibidas para revisión inicial: ${labels}.`);
-
-  questions.push('¿Tiene historial de mantenciones con fechas, kilometraje y taller?');
-  questions.push('¿Cuándo fue el último cambio de aceite y qué viscosidad se usó?');
-  questions.push('¿Ha tenido choques, reparaciones de pintura o siniestros declarados?');
-  questions.push('¿Hay consumo de aceite, pérdida de refrigerante o aumento de temperatura?');
-  questions.push('¿La transferencia puede hacerse de inmediato y sin prendas, multas o limitaciones?');
-  questions.push('¿Permite escanear el vehículo y revisarlo con mecánico antes de comprar?');
-
-  nextSteps.push('Solicitar padrón, revisión técnica, certificado de multas, certificado de anotaciones vigentes y mantenciones.');
-  nextSteps.push('Hacer prueba en frío: partida, ralentí, humo, ruidos, temperatura y funcionamiento de electroventilador.');
-  nextSteps.push('Escanear con OBD2 antes de pagar o reservar.');
-  nextSteps.push('Agendar revisión presencial profesional antes de tomar la decisión final.');
-
-  riskScore = Math.max(0, Math.min(100, riskScore));
-
-  return {
-    verdict: riskScore >= 70 ? 'Riesgo alto: no comprar sin revisión mecánica completa.' : riskScore >= 45 ? 'Riesgo medio: avanzar solo con más antecedentes y revisión presencial.' : 'Riesgo moderado/bajo: puede seguir evaluándose, pero requiere revisión profesional.',
-    riskScore,
-    estimatedKmRange: `${expectedKmLow.toLocaleString('es-CL')} - ${expectedKmHigh.toLocaleString('es-CL')} km esperados aprox. según antigüedad`,
-    redFlags,
-    positiveSignals,
-    questionsForSeller: questions,
-    recommendedNextSteps: nextSteps,
-    visualFindings: [
-      'Sin IA configurada, las fotos quedan registradas como evidencia para la pauta, pero no se interpretan visualmente en profundidad.',
-      'Para análisis visual real agrega OPENAI_API_KEY en Render.'
-    ],
-    professionalCallToAction: 'Para reducir el riesgo real de compra, agenda una inspección presencial con mecánico: escáner, prueba de ruta, revisión de fugas, tren delantero, frenos, refrigeración y documentación.'
-  };
-}
-
-async function analyzeWithOpenAI(vehicle, photos, baseAnalysis) {
-  const content = [
-    {
-      type: 'input_text',
-      text: `Eres un asesor automotriz chileno. Analiza una posible compra de vehículo usado con fotos y datos. No inventes certezas: si una foto no permite concluir algo, dilo. Entrega SOLO JSON válido con estas claves: verdict, riskScore, estimatedKmRange, visualFindings, redFlags, positiveSignals, questionsForSeller, recommendedNextSteps, professionalCallToAction. El informe NO reemplaza inspección presencial. Datos: ${JSON.stringify(vehicle)}. Análisis base: ${JSON.stringify(baseAnalysis)}`
-    },
-    ...photos.flatMap(photo => ([
-      { type: 'input_text', text: `Foto: ${photo.label}` },
-      { type: 'input_image', image_url: photo.dataUrl }
-    ]))
-  ];
-
-  const response = await fetch('https://api.openai.com/v1/responses', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      input: [{ role: 'user', content }],
-      max_output_tokens: 1700
-    })
+  res.status(400).json({
+    error: err.message || 'Error procesando la solicitud'
   });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenAI error ${response.status}: ${text.slice(0, 400)}`);
-  }
-
-  const data = await response.json();
-  const outputText = extractOutputText(data);
-  const parsed = parseJsonLoose(outputText);
-
-  return {
-    ...baseAnalysis,
-    ...parsed,
-    riskScore: clampNumber(parsed.riskScore ?? baseAnalysis.riskScore, 0, 100)
-  };
-}
-
-function extractOutputText(data) {
-  if (typeof data.output_text === 'string') return data.output_text;
-  const chunks = [];
-  for (const item of data.output || []) {
-    for (const part of item.content || []) {
-      if (part.type === 'output_text' && part.text) chunks.push(part.text);
-      if (part.type === 'text' && part.text) chunks.push(part.text);
-    }
-  }
-  return chunks.join('\n').trim();
-}
-
-function parseJsonLoose(text) {
-  if (!text) throw new Error('Respuesta de IA vacía.');
-  const cleaned = text.replace(/^```json/i, '').replace(/^```/i, '').replace(/```$/i, '').trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch (_err) {
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
-    throw new Error('La IA no devolvió JSON válido.');
-  }
-}
-
-function clampNumber(value, min, max) {
-  const n = Number(value);
-  if (Number.isNaN(n)) return min;
-  return Math.max(min, Math.min(max, n));
-}
-
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ AutoInspector activo en puerto ${PORT}`);
-  console.log(`🤖 IA visual: ${OPENAI_API_KEY ? 'activada' : 'desactivada / modo reglas'}`);
+  console.log(`AutoInspector corriendo en puerto ${PORT}`);
+  console.log(`Cloudinary: ${cloudinaryConfigured ? 'configurado' : 'no configurado'}`);
+  console.log(`Máximo por foto: ${MAX_UPLOAD_MB} MB`);
 });

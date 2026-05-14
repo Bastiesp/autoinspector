@@ -1,32 +1,18 @@
 # AutoInspector
 
-Sitio web para generar una inspección preliminar asistida por IA del estado de un vehículo usado antes de comprarlo.
+Sitio web para generar una inspección preliminar de un vehículo usado antes de comprarlo.
 
-## Qué hace
+La aplicación permite:
 
-- Solicita datos básicos del vehículo: marca, modelo, año, kilometraje, precio, combustible y transmisión.
-- Pide al menos 3 fotos obligatorias:
-  - Varilla de aceite
-  - Neumáticos
-  - Motor / vano motor
-- Permite fotos opcionales:
-  - Refrigerante / depósito
-  - Tablero / kilometraje
-  - Carrocería / pintura
-  - Interior
-  - Escape / humo visible
-- Genera un informe con:
-  - Veredicto inicial
-  - Puntaje de riesgo
-  - Alertas importantes
-  - Señales positivas
-  - Preguntas para hacer al vendedor
-  - Próximos pasos recomendados
-  - Llamado a agendar revisión presencial profesional
+- Ingresar datos básicos del vehículo.
+- Subir fotos clave tomadas desde el celular.
+- Comprimir las fotos en el navegador antes de enviarlas.
+- Guardar fotos en Cloudinary, si las variables están configuradas.
+- Analizar el caso con reglas preventivas.
+- Usar OpenAI para análisis con visión, si configuras `OPENAI_API_KEY`.
+- Generar un informe con alertas, preguntas al vendedor y próximos pasos.
 
-## Importante
-
-AutoInspector no reemplaza una inspección presencial de un mecánico. El objetivo comercial del sitio es orientar al comprador y llevarlo a solicitar una revisión profesional.
+> Importante: el informe no reemplaza la revisión presencial de un mecánico profesional.
 
 ## Estructura
 
@@ -41,15 +27,15 @@ autoinspector/
 ├─ render.yaml
 ├─ .node-version
 ├─ .env.example
+├─ .gitignore
 └─ README.md
 ```
 
-## Ejecutar localmente
+## Instalación local
 
 ```bash
 npm install
-cp .env.example .env
-npm run dev
+npm start
 ```
 
 Luego abre:
@@ -58,35 +44,69 @@ Luego abre:
 http://localhost:3000
 ```
 
-## Desplegar en Render
+## Variables de entorno
 
-1. Crea un repositorio en GitHub llamado `autoinspector`.
-2. Sube todos estos archivos a la raíz del repositorio.
-3. En Render, crea un nuevo **Web Service** conectado a ese repositorio.
-4. Usa:
-   - Build Command: `npm install`
-   - Start Command: `npm start`
-5. Agrega variables de entorno si quieres IA real:
-   - `OPENAI_API_KEY`
-   - `OPENAI_MODEL`, por ejemplo `gpt-4.1-mini`
-   - `CONTACT_WHATSAPP`, por ejemplo `56912345678`
-   - `CONTACT_EMAIL`, por ejemplo `contacto@autoinspector.cl`
+Copia `.env.example` como `.env` si trabajas localmente.
 
-## Modo con IA y modo sin IA
+```env
+PORT=3000
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
 
-- Sin `OPENAI_API_KEY`: el sistema funciona con análisis básico por reglas.
-- Con `OPENAI_API_KEY`: el backend envía los datos y fotos a la API de OpenAI para análisis visual y textual.
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+CLOUDINARY_FOLDER=autoinspector/inspections
+MAX_UPLOAD_MB=3
 
-## Endpoints
+CONTACT_WHATSAPP=56912345678
+CONTACT_EMAIL=contacto@autoinspector.cl
+```
 
-### `GET /api/health`
+## Cloudinary
 
-Verifica si el servidor está activo.
+Si no configuras Cloudinary, las fotos se usan solo durante la solicitud y no quedan guardadas permanentemente.
 
-### `GET /api/config`
+Para guardar las fotos debes agregar estas variables en Render:
 
-Entrega configuración pública del sitio.
+```env
+CLOUDINARY_CLOUD_NAME=tu_cloud_name
+CLOUDINARY_API_KEY=tu_api_key
+CLOUDINARY_API_SECRET=tu_api_secret
+CLOUDINARY_FOLDER=autoinspector/inspections
+```
 
-### `POST /api/inspect`
+Las fotos quedan ordenadas por fecha y vehículo dentro de Cloudinary.
 
-Recibe formulario `multipart/form-data` con datos del vehículo y fotos.
+## Compresión de fotos
+
+El frontend comprime cada imagen antes de subirla:
+
+- Máximo original permitido: 12 MB.
+- Tamaño máximo visual: 1400 px por lado.
+- Calidad JPEG aproximada: 72%.
+- Objetivo aproximado: 1.5 MB por foto.
+
+El servidor además aplica un límite final con `MAX_UPLOAD_MB`, por defecto 3 MB por imagen.
+
+## Deploy en Render
+
+Usa el repositorio `autoinspector` en GitHub.
+
+Configuración en Render:
+
+```txt
+Build Command: npm install
+Start Command: npm start
+```
+
+También se incluye `render.yaml`.
+
+## Endpoints útiles
+
+```txt
+GET /api/health
+POST /api/inspect
+```
+
+`/api/health` muestra si OpenAI y Cloudinary están configurados.
