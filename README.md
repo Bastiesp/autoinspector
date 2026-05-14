@@ -85,3 +85,21 @@ CONTACT_WHATSAPP=56912345678
 ```
 
 No uses `+`, espacios ni guiones en el número.
+
+## Corrección importante: fotos flexibles y estado de IA
+
+Desde esta versión, cada ítem obligatorio acepta mínimo 2 fotos desde cualquier combinación:
+
+- 2 fotos desde galería.
+- 2 fotos tomadas con cámara.
+- 1 foto de cámara + 1 foto de galería.
+
+El frontend ya no obliga a llenar “foto 1 cámara / foto 2 galería”. Cada ítem acumula fotos y valida que tenga al menos 2 antes de generar el informe.
+
+Si `/api/health` muestra `aiEnabled: false`, revisa en Render que exista exactamente esta variable:
+
+```txt
+OPENAI_API_KEY=sk-proj_tu_clave
+```
+
+Luego guarda los cambios y ejecuta **Manual Deploy → Deploy latest commit**. El endpoint `/api/health` ahora también devuelve `aiStatus` para explicar por qué la IA aparece desactivada.

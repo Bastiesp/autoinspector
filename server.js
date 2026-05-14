@@ -19,6 +19,7 @@ const CONTACT_WHATSAPP = process.env.CONTACT_WHATSAPP || '';
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || '';
 const MECHANIC_NAME = process.env.MECHANIC_NAME || 'AutoInspector Mecánico';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
 
 const cloudinaryEnabled = Boolean(
   process.env.CLOUDINARY_CLOUD_NAME &&
@@ -35,8 +36,11 @@ if (cloudinaryEnabled) {
   });
 }
 
-const aiEnabled = Boolean(process.env.OPENAI_API_KEY);
-const openai = aiEnabled ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const aiEnabled = Boolean(OPENAI_API_KEY && OPENAI_API_KEY.startsWith('sk-'));
+const aiStatus = aiEnabled
+  ? 'Configurada'
+  : 'No configurada: agrega OPENAI_API_KEY en Render con una clave que empiece con sk- o sk-proj- y redeploya.';
+const openai = aiEnabled ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -433,8 +437,9 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     name: 'AutoInspector',
-    version: '1.2.0-premium-cloudinary',
+    version: '1.3.0-fotos-flexibles-ai-status',
     aiEnabled,
+    aiStatus,
     cloudinaryEnabled,
     maxUploadMb: MAX_UPLOAD_MB,
     maxFiles: MAX_FILES,
@@ -536,5 +541,6 @@ app.get('*', (_req, res) => {
 app.listen(PORT, () => {
   console.log(`AutoInspector running on port ${PORT}`);
   console.log(`AI enabled: ${aiEnabled}`);
+  console.log(`AI status: ${aiStatus}`);
   console.log(`Cloudinary enabled: ${cloudinaryEnabled}`);
 });
