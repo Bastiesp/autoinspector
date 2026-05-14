@@ -223,24 +223,69 @@ function buildContactText(report, inspectionId) {
   ].join('\n');
 }
 
+function normalizeWhatsapp(value = '') {
+  return String(value).replace(/[^0-9]/g, '');
+}
+
+function openContactFallback(event) {
+  event.preventDefault();
+  const contactSection = $('#contacto');
+  if (contactSection) contactSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  showToast('Configura CONTACT_WHATSAPP o CONTACT_EMAIL en Render para activar el contacto directo.', 6200);
+}
+
 function configureContactButtons(contact = {}, report = {}, inspectionId = '') {
-  const whatsapp = contact.whatsapp || appConfig.contactWhatsapp || '';
-  const email = contact.email || appConfig.contactEmail || '';
+  const whatsapp = normalizeWhatsapp(contact.whatsapp || appConfig.contactWhatsapp || '');
+  const email = String(contact.email || appConfig.contactEmail || '').trim();
   const text = buildContactText(report, inspectionId);
 
   const whatsappUrl = whatsapp
-    ? `https://wa.me/${String(whatsapp).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(text)}`
-    : '#';
+    ? `https://wa.me/${whatsapp}?text=${encodeURIComponent(text)}`
+    : '';
   const emailUrl = email
     ? `mailto:${email}?subject=${encodeURIComponent('Revisión presencial AutoInspector')}&body=${encodeURIComponent(text)}`
-    : '#';
+    : '';
 
+  const preferredUrl = whatsappUrl || emailUrl;
   for (const id of ['whatsappBtn', 'topContactBtn', 'reportContactBtn']) {
     const el = $(`#${id}`);
-    if (el) el.href = whatsappUrl;
+    if (!el) continue;
+    el.removeEventListener('click', openContactFallback);
+    if (preferredUrl) {
+      el.href = preferredUrl;
+      el.target = preferredUrl.startsWith('https://') ? '_blank' : '_self';
+      el.rel = 'noopener noreferrer';
+      el.classList.remove('is-disabled');
+    } else {
+      el.href = '#contacto';
+      el.target = '_self';
+      el.removeAttribute('rel');
+      el.classList.add('is-disabled');
+      el.addEventListener('click', openContactFallback);
+    }
   }
+
   const emailBtn = $('#emailBtn');
-  if (emailBtn) emailBtn.href = emailUrl;
+  if (emailBtn) {
+    emailBtn.removeEventListener('click', openContactFallback);
+    if (emailUrl) {
+      emailBtn.href = emailUrl;
+      emailBtn.target = '_self';
+      emailBtn.classList.remove('is-disabled');
+    } else if (whatsappUrl) {
+      emailBtn.href = whatsappUrl;
+      emailBtn.target = '_blank';
+      emailBtn.rel = 'noopener noreferrer';
+      emailBtn.classList.remove('is-disabled');
+      emailBtn.textContent = 'Contactar por WhatsApp';
+    } else {
+      emailBtn.href = '#contacto';
+      emailBtn.target = '_self';
+      emailBtn.removeAttribute('rel');
+      emailBtn.classList.add('is-disabled');
+      emailBtn.addEventListener('click', openContactFallback);
+    }
+  }
 }
 
 async function handleSubmit(event) {
