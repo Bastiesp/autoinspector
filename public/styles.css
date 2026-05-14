@@ -446,3 +446,23 @@ li { margin: 8px 0; line-height: 1.5; }
   p, li, span, .disclaimer { color: #111827 !important; }
   .result-section { display: block !important; }
 }
+
+.status-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 9px;
+  border-radius: 999px;
+  font-size: 15px;
+  vertical-align: middle;
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.status-dot.ok { background: rgba(34, 197, 94, 0.18); }
+.status-dot.warning { background: rgba(245, 158, 11, 0.2); }
+.status-dot.critical { background: rgba(239, 68, 68, 0.2); }
+.report-block[data-status="ok"] { border-color: rgba(34, 197, 94, 0.28); }
+.report-block[data-status="warning"] { border-color: rgba(245, 158, 11, 0.34); }
+.report-block[data-status="critical"] { border-color: rgba(239, 68, 68, 0.38); }
+.report-block h4 { display: flex; align-items: center; gap: 2px; }

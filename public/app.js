@@ -187,8 +187,8 @@ function removePhoto(itemKey, index) {
 
 function appendFilesToFormData(formData) {
   for (const [itemKey, files] of selectedFiles.entries()) {
-    files.forEach((file, index) => {
-      formData.append(`${itemKey}_${index + 1}`, file, file.name);
+    files.forEach((file) => {
+      formData.append(`${itemKey}_photos`, file, file.name);
     });
   }
 }
@@ -216,12 +216,39 @@ function escapeHtml(str) {
     .replaceAll("'", '&#039;');
 }
 
+function statusIcon(status) {
+  if (status === 'critical') return '❌';
+  if (status === 'warning') return '⚠️';
+  return '✅';
+}
+
+function statusLabel(status) {
+  if (status === 'critical') return 'Necesita revisión urgente';
+  if (status === 'warning') return 'Revisar con atención';
+  return 'Bien / sin alerta grave';
+}
+
+function applyBlockStatuses(statuses = {}) {
+  document.querySelectorAll('[data-status-block]').forEach((block) => {
+    const key = block.dataset.statusBlock;
+    const status = statuses[key] || 'warning';
+    const heading = block.querySelector('h4');
+    if (!heading) return;
+
+    const baseTitle = heading.dataset.baseTitle || heading.textContent.replace(/^[✅⚠️❌]\s*/, '').trim();
+    heading.dataset.baseTitle = baseTitle;
+    heading.innerHTML = `<span class="status-dot ${status}" title="${statusLabel(status)}">${statusIcon(status)}</span>${escapeHtml(baseTitle)}`;
+    block.dataset.status = status;
+  });
+}
+
 function renderReport(payload) {
   const { report, photos, contact, inspectionId } = payload;
   $('#resultSection').classList.remove('hidden');
   $('#reportVerdict').textContent = report.verdict || 'Informe generado';
   $('#reportMode').textContent = `${report.mode || 'Análisis'} · ID ${inspectionId}`;
   $('#riskScore').textContent = Math.round(report.riskScore || 0);
+  applyBlockStatuses(report.blockStatuses || {});
 
   const price = report.prices?.analysis || {};
   $('#priceCategory').textContent = price.category || 'No evaluado';
@@ -238,7 +265,7 @@ function renderReport(payload) {
   $('#concernSummary').textContent = report.buyerConcernOpinion || report.buyerConcern || 'No informado';
   $('#alertsList').innerHTML = listToHtml(report.alerts);
   $('#positivesList').innerHTML = listToHtml(report.positives);
-  $('#photoObservations').innerHTML = listToHtml(report.photoObservations, 'La IA no agregó observaciones específicas de fotos.');
+  $('#photoObservations').innerHTML = listToHtml(report.photoObservations, 'No hay observaciones visuales suficientes. Revisa que la IA esté activa en /api/health y que las fotos estén claras.');
   $('#questionsList').innerHTML = listToHtml(report.questions);
   $('#nextStepsList').innerHTML = listToHtml(report.nextSteps);
   $('#disclaimer').textContent = report.disclaimer || 'Este informe no reemplaza una revisión presencial de un mecánico profesional.';
