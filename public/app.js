@@ -265,7 +265,11 @@ function renderReport(payload) {
   $('#concernSummary').textContent = report.buyerConcernOpinion || report.buyerConcern || 'No informado';
   $('#alertsList').innerHTML = listToHtml(report.alerts);
   $('#positivesList').innerHTML = listToHtml(report.positives);
-  $('#photoObservations').innerHTML = listToHtml(report.photoObservations, 'No hay observaciones visuales suficientes. Revisa que la IA esté activa en /api/health y que las fotos estén claras.');
+  const photoItems = Array.isArray(report.photoObservations) ? [...report.photoObservations] : [];
+  if (report.aiError) {
+    photoItems.unshift(`⚠️ IA visual no ejecutada: ${report.aiErrorDetail || report.aiError}`);
+  }
+  $('#photoObservations').innerHTML = listToHtml(photoItems, 'No hay observaciones visuales suficientes. Revisa que la IA esté activa en /api/health, /api/ai-test y que las fotos estén claras.');
   $('#questionsList').innerHTML = listToHtml(report.questions);
   $('#nextStepsList').innerHTML = listToHtml(report.nextSteps);
   $('#disclaimer').textContent = report.disclaimer || 'Este informe no reemplaza una revisión presencial de un mecánico profesional.';
