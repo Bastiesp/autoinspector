@@ -3,10 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AutoInspector — Revisión IA antes de comprar</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <title>AutoInspector</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -14,155 +11,226 @@
     <nav class="nav">
       <div class="brand">
         <span class="brand-icon">AI</span>
-        <span>AutoInspector</span>
-      </div>
-      <a class="nav-link" href="#inspeccion">Crear informe</a>
-    </nav>
-
-    <section class="hero-grid">
-      <div>
-        <p class="eyebrow">Inspección preliminar asistida por IA</p>
-        <h1>Evalúa mejor un auto usado antes de comprarlo.</h1>
-        <p class="hero-text">
-          Sube fotos clave tomadas en el momento, agrega datos del vehículo y recibe un informe inicial con riesgos,
-          preguntas para el vendedor y próximos pasos recomendados.
-        </p>
-        <div class="hero-actions">
-          <a class="primary-btn" href="#inspeccion">Empezar revisión</a>
-          <a class="secondary-btn" href="#como-funciona">Cómo funciona</a>
+        <div>
+          <strong>AutoInspector</strong>
+          <small>Inspección preliminar con IA</small>
         </div>
       </div>
-      <div class="hero-card">
-        <h2>Fotos mínimas requeridas</h2>
-        <ul>
-          <li>Varilla de aceite</li>
-          <li>Neumáticos</li>
-          <li>Motor / vano motor</li>
-        </ul>
-        <p>
-          Mientras más evidencia agregues, más útil será el informe. La revisión final debe hacerla un mecánico presencialmente.
+      <a class="nav-cta" href="#formulario">Iniciar inspección</a>
+    </nav>
+
+    <section class="hero-content">
+      <div>
+        <p class="eyebrow">Compra autos usados con más información</p>
+        <h1>Analiza señales importantes antes de comprar un vehículo.</h1>
+        <p class="hero-text">
+          Sube fotos clave, ingresa datos básicos y recibe un informe preliminar con alertas,
+          preguntas para el vendedor y recomendación de revisión profesional.
         </p>
+        <div class="hero-actions">
+          <a href="#formulario" class="button primary">Crear informe</a>
+          <a href="#como-funciona" class="button secondary">Cómo funciona</a>
+        </div>
+      </div>
+
+      <div class="hero-card">
+        <h2>Revisión mínima</h2>
+        <ul>
+          <li>Foto de varilla de aceite</li>
+          <li>Foto de neumáticos</li>
+          <li>Foto del motor</li>
+          <li>Datos de año y kilometraje</li>
+          <li>Preguntas sugeridas al vendedor</li>
+        </ul>
       </div>
     </section>
   </header>
 
   <main>
-    <section id="como-funciona" class="section narrow">
-      <p class="eyebrow">Objetivo real</p>
-      <h2>No reemplaza al mecánico: te ayuda a comprar con más información.</h2>
-      <p>
-        AutoInspector entrega una orientación inicial. Detecta señales de alerta, sugiere preguntas y te indica qué verificar antes de pagar.
-        El paso final recomendado siempre será una inspección profesional presencial.
-      </p>
+    <section id="como-funciona" class="section grid-3">
+      <article class="info-card">
+        <span>1</span>
+        <h3>Ingresa datos</h3>
+        <p>Marca, modelo, año, kilometraje, precio y antecedentes conocidos.</p>
+      </article>
+      <article class="info-card">
+        <span>2</span>
+        <h3>Sube fotos</h3>
+        <p>Adjunta imágenes tomadas en el momento de puntos críticos del vehículo.</p>
+      </article>
+      <article class="info-card">
+        <span>3</span>
+        <h3>Recibe informe</h3>
+        <p>Obtén veredicto preliminar, alertas y próximos pasos antes de comprar.</p>
+      </article>
     </section>
 
-    <section id="inspeccion" class="section form-section">
-      <div class="section-heading">
-        <p class="eyebrow">Informe inicial</p>
-        <h2>Datos del vehículo</h2>
+    <section id="formulario" class="section form-section">
+      <div class="section-title">
+        <p class="eyebrow">Formulario</p>
+        <h2>Crear inspección preliminar</h2>
+        <p>
+          Mientras más información agregues, más útil será el informe. Las fotos obligatorias son
+          varilla de aceite, neumáticos y motor. Las imágenes se comprimen automáticamente en tu celular antes de subirlas.
+        </p>
       </div>
 
       <form id="inspectionForm" class="inspection-form">
         <div class="form-grid">
-          <label>Marca
-            <input required name="brand" placeholder="Ej: Jeep" />
+          <label>
+            Marca
+            <input name="brand" required placeholder="Ej: Jeep" />
           </label>
-          <label>Modelo
-            <input required name="model" placeholder="Ej: Renegade 1.8" />
+
+          <label>
+            Modelo
+            <input name="model" required placeholder="Ej: Renegade" />
           </label>
-          <label>Año
-            <input required name="year" type="number" min="1980" max="2027" placeholder="Ej: 2018" />
+
+          <label>
+            Año
+            <input name="year" required type="number" min="1980" max="2030" placeholder="Ej: 2018" />
           </label>
-          <label>Kilometraje
-            <input required name="km" inputmode="numeric" placeholder="Ej: 98000" />
+
+          <label>
+            Kilometraje
+            <input name="mileage" required type="number" min="0" placeholder="Ej: 120000" />
           </label>
-          <label>Precio publicado
-            <input name="price" inputmode="numeric" placeholder="Ej: 8500000" />
-          </label>
-          <label>Combustible
+
+          <label>
+            Combustible
             <select name="fuel">
               <option value="">Seleccionar</option>
-              <option>Bencina</option>
-              <option>Diésel</option>
-              <option>Híbrido</option>
-              <option>Eléctrico</option>
-              <option>Gas</option>
+              <option value="gasoline">Bencina</option>
+              <option value="diesel">Diésel</option>
+              <option value="hybrid">Híbrido</option>
+              <option value="electric">Eléctrico</option>
             </select>
           </label>
-          <label>Transmisión
+
+          <label>
+            Transmisión
             <select name="transmission">
               <option value="">Seleccionar</option>
-              <option>Manual</option>
-              <option>Automática</option>
-              <option>CVT</option>
-              <option>No informado</option>
+              <option value="manual">Manual</option>
+              <option value="automatic">Automática</option>
             </select>
+          </label>
+
+          <label>
+            Precio publicado
+            <input name="price" placeholder="Ej: $8.500.000" />
           </label>
         </div>
 
-        <label>Notas del vendedor o antecedentes conocidos
-          <textarea name="sellerNotes" rows="4" placeholder="Ej: mantenciones al día, único dueño, falla declarada, choque anterior, etc."></textarea>
+        <div class="checks">
+          <label><input type="checkbox" name="warningLights" value="true" /> Tiene luces de advertencia encendidas</label>
+          <label><input type="checkbox" name="oilLeaks" value="true" /> Sospecha de fugas de aceite</label>
+          <label><input type="checkbox" name="overheating" value="true" /> Antecedentes de temperatura alta</label>
+          <label><input type="checkbox" name="accidentHistory" value="true" /> Sospecha o antecedente de choque</label>
+        </div>
+
+        <label>
+          Comentarios del vendedor o detalles conocidos
+          <textarea name="sellerNotes" rows="4" placeholder="Ej: dueño dice que hizo mantención hace poco, no tiene historial, etc."></textarea>
         </label>
 
-        <label>Preguntas o dudas que ya tienes
-          <textarea name="buyerQuestions" rows="3" placeholder="Ej: me preocupa que consuma aceite, temperatura, humo, ruidos, etc."></textarea>
-        </label>
-
-        <div class="section-heading inner">
-          <p class="eyebrow">Fotos tomadas en el momento</p>
-          <h2>Evidencia visual</h2>
-          <p>En celular, el botón abre cámara o galería. Idealmente toma fotos nítidas, con buena luz y cerca del componente.</p>
+        <div class="upload-rules">
+          <strong>Límite de fotos</strong>
+          <p>
+            Cada foto original puede pesar hasta 12 MB. Antes de enviarla, el navegador la reduce a máximo
+            1400 px por lado y cerca de 1.5 MB para ahorrar espacio en Cloudinary.
+          </p>
+          <div id="compressionStatus" class="compression-status info">Aún no has seleccionado fotos.</div>
         </div>
 
         <div class="photo-grid">
-          <label class="photo-card required">Varilla de aceite <span>obligatoria</span>
-            <input required type="file" name="oilDipstick" accept="image/*" capture="environment" />
+          <label class="photo-box required">
+            <strong>Varilla de aceite *</strong>
+            <small>Foto clara del nivel y color del aceite.</small>
+            <input name="oilDipstick" type="file" accept="image/*" capture="environment" required />
+            <span class="photo-status"></span>
           </label>
-          <label class="photo-card required">Neumáticos <span>obligatoria</span>
-            <input required type="file" name="tires" accept="image/*" capture="environment" />
+
+          <label class="photo-box required">
+            <strong>Neumáticos *</strong>
+            <small>Dibujo, desgaste lateral y fecha DOT si se puede.</small>
+            <input name="tires" type="file" accept="image/*" capture="environment" required />
+            <span class="photo-status"></span>
           </label>
-          <label class="photo-card required">Motor / vano motor <span>obligatoria</span>
-            <input required type="file" name="engineBay" accept="image/*" capture="environment" />
+
+          <label class="photo-box required">
+            <strong>Motor *</strong>
+            <small>Vista general del vano motor.</small>
+            <input name="engine" type="file" accept="image/*" capture="environment" required />
+            <span class="photo-status"></span>
           </label>
-          <label class="photo-card">Refrigerante / depósito <span>opcional</span>
-            <input type="file" name="coolant" accept="image/*" capture="environment" />
+
+          <label class="photo-box">
+            <strong>Refrigerante</strong>
+            <small>Depósito, color, nivel y tapa.</small>
+            <input name="coolant" type="file" accept="image/*" capture="environment" />
+            <span class="photo-status"></span>
           </label>
-          <label class="photo-card">Tablero / kilometraje <span>opcional</span>
-            <input type="file" name="dashboard" accept="image/*" capture="environment" />
+
+          <label class="photo-box">
+            <strong>Tablero</strong>
+            <small>Kilometraje y testigos con motor encendido.</small>
+            <input name="dashboard" type="file" accept="image/*" capture="environment" />
+            <span class="photo-status"></span>
           </label>
-          <label class="photo-card">Carrocería / pintura <span>opcional</span>
-            <input type="file" name="bodywork" accept="image/*" capture="environment" />
+
+          <label class="photo-box">
+            <strong>Carrocería</strong>
+            <small>Frente, costados o zonas con posibles daños.</small>
+            <input name="bodywork" type="file" accept="image/*" capture="environment" />
+            <span class="photo-status"></span>
           </label>
-          <label class="photo-card">Interior <span>opcional</span>
-            <input type="file" name="interior" accept="image/*" capture="environment" />
+
+          <label class="photo-box">
+            <strong>Interior</strong>
+            <small>Volante, pedales, asiento conductor.</small>
+            <input name="interior" type="file" accept="image/*" capture="environment" />
+            <span class="photo-status"></span>
           </label>
-          <label class="photo-card">Escape / humo visible <span>opcional</span>
-            <input type="file" name="exhaust" accept="image/*" capture="environment" />
+
+          <label class="photo-box">
+            <strong>Escape / humo</strong>
+            <small>Foto o captura si existe humo visible.</small>
+            <input name="exhaust" type="file" accept="image/*" capture="environment" />
+            <span class="photo-status"></span>
           </label>
         </div>
 
-        <div class="notice">
-          <strong>Importante:</strong> este informe es una ayuda preliminar. No certifica el estado real del vehículo ni reemplaza una revisión mecánica presencial.
+        <div class="disclaimer">
+          AutoInspector entrega una orientación preliminar. No reemplaza la revisión presencial
+          de un mecánico profesional ni garantiza el estado legal, mecánico o estructural del vehículo.
         </div>
 
-        <button id="submitBtn" class="primary-btn full" type="submit">Generar informe AutoInspector</button>
+        <button id="submitBtn" class="button primary full" type="submit">
+          Generar informe
+        </button>
       </form>
     </section>
 
-    <section id="resultSection" class="section result-section hidden">
-      <div class="result-header">
-        <div>
-          <p class="eyebrow">Resultado</p>
-          <h2>Informe AutoInspector</h2>
-        </div>
-        <button id="printBtn" class="secondary-btn" type="button">Imprimir / guardar PDF</button>
+    <section id="resultado" class="section result-section hidden">
+      <div class="section-title">
+        <p class="eyebrow">Resultado</p>
+        <h2>Informe preliminar</h2>
       </div>
-      <div id="resultContent" class="result-content"></div>
+
+      <div id="reportBox" class="report-box"></div>
+
+      <div class="report-actions">
+        <button class="button secondary" onclick="window.print()">Imprimir / guardar PDF</button>
+        <a class="button primary" id="whatsappLink" target="_blank" rel="noopener">Solicitar revisión profesional</a>
+      </div>
     </section>
   </main>
 
-  <footer class="footer">
-    <p>AutoInspector — Orientación inicial para compradores de vehículos usados.</p>
+  <footer>
+    <strong>AutoInspector</strong>
+    <span>Orientación preliminar para compradores de autos usados.</span>
   </footer>
 
   <script src="/app.js"></script>
