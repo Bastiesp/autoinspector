@@ -115,3 +115,31 @@ Si el informe muestra “Reglas preventivas, IA no disponible temporalmente”, 
 - `OPENAI_MODEL` puede quedar como `gpt-4o-mini`.
 
 Aunque la IA falle, AutoInspector mostrará observaciones preventivas por reglas y símbolos visuales por bloque: ✅ correcto, ⚠️ revisar y ❌ urgente.
+
+
+## Diagnóstico de IA visual
+
+Después de desplegar en Render revisa:
+
+```txt
+https://tu-sitio.onrender.com/api/health
+```
+
+Debe mostrar `aiEnabled: true`, `openaiModel: gpt-4o-mini` y una vista parcial de la clave.
+
+Luego prueba:
+
+```txt
+https://tu-sitio.onrender.com/api/ai-test
+```
+
+Si falla, el error dirá si el problema es clave inválida, falta de créditos/billing, modelo no disponible o variable mal escrita.
+
+La variable correcta recomendada es:
+
+```txt
+OPENAI_API_KEY=sk-proj-tu_clave
+OPENAI_MODEL=gpt-4o-mini
+```
+
+No subas claves reales a GitHub. Configúralas solo en Render como Environment Variables.

@@ -19,7 +19,27 @@ const CONTACT_WHATSAPP = process.env.CONTACT_WHATSAPP || '';
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || '';
 const MECHANIC_NAME = process.env.MECHANIC_NAME || 'AutoInspector Mecánico';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
+function cleanEnvSecret(value) {
+  return String(value || '').trim().replace(/^['\"]|['\"]$/g, '');
+}
+const OPENAI_API_KEY = cleanEnvSecret(
+  process.env.OPENAI_API_KEY ||
+  process.env.OPENAI_KEY ||
+  process.env.OPENAI_APIKEY ||
+  process.env.API_KEY ||
+  process.env.OPENAI_SECRET_KEY
+);
+const OPENAI_KEY_SOURCE = process.env.OPENAI_API_KEY ? 'OPENAI_API_KEY'
+  : process.env.OPENAI_KEY ? 'OPENAI_KEY'
+    : process.env.OPENAI_APIKEY ? 'OPENAI_APIKEY'
+      : process.env.API_KEY ? 'API_KEY'
+        : process.env.OPENAI_SECRET_KEY ? 'OPENAI_SECRET_KEY'
+          : '';
+function maskKey(value) {
+  if (!value) return '';
+  if (value.length <= 12) return `${value.slice(0, 4)}...`;
+  return `${value.slice(0, 7)}...${value.slice(-4)}`;
+}
 
 const cloudinaryEnabled = Boolean(
   process.env.CLOUDINARY_CLOUD_NAME &&
@@ -36,10 +56,10 @@ if (cloudinaryEnabled) {
   });
 }
 
-const aiEnabled = Boolean(OPENAI_API_KEY && OPENAI_API_KEY.startsWith('sk-'));
+const aiEnabled = Boolean(OPENAI_API_KEY);
 const aiStatus = aiEnabled
-  ? 'Configurada'
-  : 'No configurada: agrega OPENAI_API_KEY en Render con una clave que empiece con sk- o sk-proj- y redeploya.';
+  ? `Clave detectada en ${OPENAI_KEY_SOURCE || 'variable compatible'} (${maskKey(OPENAI_API_KEY)}). La prueba real depende de créditos/billing/modelo.`
+  : 'No configurada: agrega OPENAI_API_KEY en Render, sin comillas, y redeploya.';
 const openai = aiEnabled ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 const upload = multer({
@@ -390,20 +410,89 @@ function uploadToCloudinary(file, context) {
   });
 }
 
+async function callOpenAiVision(content) {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages: [{ role: 'user', content }],
+      temperature: 0.15,
+      response_format: { type: 'json_object' },
+      max_tokens: 1800
+    })
+  });
+
+  const text = await response.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (_error) {
+    throw new Error(`OpenAI respondió con texto no JSON. HTTP ${response.status}: ${text.slice(0, 300)}`);
+  }
+
+  if (!response.ok) {
+    const message = json?.error?.message || JSON.stringify(json).slice(0, 300);
+    throw new Error(`OpenAI HTTP ${response.status}: ${message}`);
+  }
+
+  const contentText = json?.choices?.[0]?.message?.content;
+  if (!contentText) {
+    throw new Error('OpenAI no devolvió contenido analizable.');
+  }
+
+  return JSON.parse(contentText);
+}
+
 async function tryAiReport(fields, uploadedPhotos, ruleReport) {
-  if (!openai || uploadedPhotos.length === 0) return ruleReport;
+  if (!OPENAI_API_KEY) {
+    return {
+      ...ruleReport,
+      mode: 'Reglas preventivas, IA no configurada',
+      aiError: 'No hay OPENAI_API_KEY en Render. Agrega la variable y redeploya.'
+    };
+  }
+
+  if (uploadedPhotos.length === 0) return ruleReport;
 
   const maxPhotosForAi = uploadedPhotos.slice(0, 12);
+  const photosByItem = maxPhotosForAi.reduce((acc, photo) => {
+    if (!acc[photo.itemLabel]) acc[photo.itemLabel] = 0;
+    acc[photo.itemLabel] += 1;
+    return acc;
+  }, {});
+
   const content = [
     {
       type: 'text',
       text: `
-Eres un asistente de preinspección automotriz para compradores de autos usados en Chile.
-No reemplazas a un mecánico. Debes ser prudente, claro y orientado a riesgos.
-Devuelve SOLO JSON válido con estas claves:
-verdict, riskScore, alerts, positives, photoObservations, priceOpinion, buyerConcernOpinion, questions, nextSteps, disclaimer.
+Eres un perito asistente de preinspección automotriz para compradores de autos usados en Chile.
+Tu tarea principal es ANALIZAR VISUALMENTE las fotos recibidas. No hagas solo un resumen de que las fotos existen.
+No reemplazas a un mecánico. Debes ser prudente, profesional y orientado a riesgos.
 
-El priceOpinion debe analizar explícitamente si el precio de compra está muy por debajo, bajo promedio, cercano al promedio, sobre promedio o muy por encima del mercado. Si está muy por debajo o muy por encima, debe indicar una alerta clara y qué validar antes de pagar.
+Devuelve SOLO JSON válido con estas claves exactas:
+{
+  "verdict": "string",
+  "riskScore": number,
+  "alerts": ["string"],
+  "positives": ["string"],
+  "photoObservations": ["string"],
+  "priceOpinion": "string",
+  "buyerConcernOpinion": "string",
+  "questions": ["string"],
+  "nextSteps": ["string"],
+  "disclaimer": "string"
+}
+
+Reglas obligatorias para photoObservations:
+- Debe contener al menos una observación por cada ítem fotografiado.
+- Cada observación debe empezar con ✅ si visualmente parece correcto, ⚠️ si requiere revisión, o ❌ si parece urgente.
+- Menciona lo que se ve o no se puede confirmar: color/estado del aceite, desgaste o profundidad visible de neumáticos, fugas aparentes, suciedad excesiva, óxido, modificaciones, mangueras, depósito, tablero, carrocería, interior, etc.
+- Si la foto es borrosa, oscura, mal encuadrada o no permite evaluar, dilo con ⚠️ y pide una nueva toma.
+- No inventes fallas que no se ven.
 
 Datos del vehículo:
 Marca: ${fields.brand || 'No informado'}
@@ -420,35 +509,34 @@ Mantenciones declaradas: ${fields.maintenance || 'No informado'}
 Luces tablero: ${fields.warningLights || 'No informado'}
 Humo: ${fields.smoke || 'No informado'}
 Pérdida refrigerante: ${fields.coolantLoss || 'No informado'}
+Fotos recibidas por ítem: ${Object.entries(photosByItem).map(([k, v]) => `${k}: ${v}`).join(', ')}
 
-Considera que hay dos fotos por item cuando existan. Si una foto no permite evaluar, dilo.
-No inventes fallas que no se ven. Usa lenguaje profesional, breve y útil.
+El priceOpinion debe analizar explícitamente si el precio de compra está muy por debajo, bajo promedio, cercano al promedio, sobre promedio o muy por encima del mercado. Si está muy por debajo o muy por encima, debe indicar alerta clara.
       `.trim()
     }
   ];
 
   for (const photo of maxPhotosForAi) {
-    content.push({ type: 'text', text: `Foto: ${photo.itemLabel}, toma ${photo.slot}` });
-    content.push({ type: 'image_url', image_url: { url: photo.dataUrl, detail: 'low' } });
+    content.push({ type: 'text', text: `Analiza esta imagen: ${photo.itemLabel}, toma ${photo.slot}` });
+    content.push({ type: 'image_url', image_url: { url: photo.dataUrl, detail: 'high' } });
   }
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: OPENAI_MODEL,
-      messages: [{ role: 'user', content }],
-      temperature: 0.2,
-      response_format: { type: 'json_object' }
-    });
+    const parsed = await callOpenAiVision(content);
+    const aiPhotoObservations = Array.isArray(parsed.photoObservations)
+      ? parsed.photoObservations.filter(Boolean)
+      : [];
 
-    const parsed = JSON.parse(completion.choices[0].message.content);
     return {
       ...ruleReport,
-      mode: 'IA + reglas preventivas',
+      mode: 'IA visual + reglas preventivas',
       verdict: parsed.verdict || ruleReport.verdict,
       riskScore: Number(parsed.riskScore ?? ruleReport.riskScore),
       alerts: Array.isArray(parsed.alerts) ? parsed.alerts : ruleReport.alerts,
       positives: Array.isArray(parsed.positives) ? parsed.positives : ruleReport.positives,
-      photoObservations: Array.isArray(parsed.photoObservations) && parsed.photoObservations.length ? parsed.photoObservations : ruleReport.photoObservations,
+      photoObservations: aiPhotoObservations.length ? aiPhotoObservations : [
+        '⚠️ La IA respondió, pero no entregó observaciones visuales específicas. Reintenta con fotos más claras y cercanas.'
+      ],
       aiPriceOpinion: parsed.priceOpinion || '',
       buyerConcernOpinion: parsed.buyerConcernOpinion || '',
       blockStatuses: ruleReport.blockStatuses,
@@ -457,12 +545,15 @@ No inventes fallas que no se ven. Usa lenguaje profesional, breve y útil.
       disclaimer: parsed.disclaimer || ruleReport.disclaimer
     };
   } catch (error) {
-    console.error('AI report error:', error.message);
+    console.error('AI report error full:', error);
     return {
       ...ruleReport,
       mode: 'Reglas preventivas, IA no disponible temporalmente',
-      photoObservations: ruleReport.photoObservations,
-      aiError: 'No fue posible completar el análisis con IA. Revisa /api/health, OPENAI_API_KEY, créditos de API y OPENAI_MODEL en Render.',
+      photoObservations: [
+        '⚠️ La IA visual no pudo ejecutarse. Este bloque muestra solo validación preventiva de fotos recibidas.',
+        ...ruleReport.photoObservations
+      ],
+      aiError: 'No fue posible completar el análisis con IA visual. Revisa /api/health, /api/ai-test, OPENAI_API_KEY, créditos de API y OPENAI_MODEL en Render.',
       aiErrorDetail: error.message
     };
   }
@@ -472,14 +563,52 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     name: 'AutoInspector',
-    version: '1.4.0-status-badges-ai-debug',
+    version: '1.5.0-real-vision-debug',
     aiEnabled,
     aiStatus,
+    openaiModel: OPENAI_MODEL,
+    openaiKeySource: OPENAI_KEY_SOURCE || null,
+    openaiKeyPreview: maskKey(OPENAI_API_KEY) || null,
     cloudinaryEnabled,
     maxUploadMb: MAX_UPLOAD_MB,
     maxFiles: MAX_FILES,
     contactConfigured: Boolean(CONTACT_WHATSAPP || CONTACT_EMAIL)
   });
+});
+
+
+app.get('/api/ai-test', async (_req, res) => {
+  if (!OPENAI_API_KEY) {
+    return res.status(400).json({
+      ok: false,
+      aiEnabled: false,
+      error: 'No hay OPENAI_API_KEY configurada en Render.'
+    });
+  }
+
+  try {
+    const parsed = await callOpenAiVision([
+      { type: 'text', text: 'Responde SOLO JSON válido: {"ok":true,"message":"IA funcionando"}' }
+    ]);
+    res.json({
+      ok: true,
+      aiEnabled: true,
+      model: OPENAI_MODEL,
+      keySource: OPENAI_KEY_SOURCE || null,
+      keyPreview: maskKey(OPENAI_API_KEY),
+      response: parsed
+    });
+  } catch (error) {
+    console.error('GET /api/ai-test error:', error);
+    res.status(500).json({
+      ok: false,
+      aiEnabled: true,
+      model: OPENAI_MODEL,
+      keySource: OPENAI_KEY_SOURCE || null,
+      keyPreview: maskKey(OPENAI_API_KEY),
+      error: error.message
+    });
+  }
 });
 
 app.get('/api/config', (_req, res) => {
