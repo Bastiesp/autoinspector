@@ -18,7 +18,7 @@ const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || 'autoinspector/inspec
 const CONTACT_WHATSAPP = process.env.CONTACT_WHATSAPP || '';
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || '';
 const MECHANIC_NAME = process.env.MECHANIC_NAME || 'AutoInspector Mecánico';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
 
 const cloudinaryEnabled = Boolean(
@@ -285,8 +285,29 @@ function buildRuleBasedReport(fields, uploadedPhotos) {
     questions.unshift(`Sobre tu sospecha: “${concern}”, pide evidencia concreta y prueba el vehículo en frío y en caliente.`);
   }
 
+  const photoObservations = [];
+  for (const item of ALL_ITEMS) {
+    const count = byItem[item.key] || 0;
+    if (count >= 2) {
+      photoObservations.push(`✅ ${item.label}: se recibieron ${count} fotos. Este punto queda documentado para revisión preliminar visual.`);
+    } else if (REQUIRED_ITEMS.some((required) => required.key === item.key)) {
+      photoObservations.push(`❌ ${item.label}: faltan fotos suficientes para evaluar este punto crítico.`);
+    } else if (count === 1) {
+      photoObservations.push(`⚠️ ${item.label}: se recibió solo 1 foto; conviene agregar otra toma desde distinto ángulo.`);
+    }
+  }
+
+  const statusFromRisk = riskScore >= 70 ? 'critical' : riskScore >= 45 ? 'warning' : 'ok';
+  const priceStatus = ['critical-low', 'critical-high'].includes(priceAnalysis.level)
+    ? 'critical'
+    : ['low', 'high', 'unknown'].includes(priceAnalysis.level)
+      ? 'warning'
+      : 'ok';
+  const photosStatus = REQUIRED_ITEMS.every((item) => (byItem[item.key] || 0) >= 2) ? 'ok' : 'critical';
+  const concernStatus = concern.length > 10 ? 'warning' : 'ok';
+
   return {
-    mode: aiEnabled ? 'Reglas + IA no disponible en este momento' : 'Reglas preventivas sin IA',
+    mode: aiEnabled ? 'Reglas + IA pendiente' : 'Reglas preventivas sin IA',
     generatedAt: new Date().toISOString(),
     vehicle: {
       brand: fields.brand || '',
@@ -304,6 +325,17 @@ function buildRuleBasedReport(fields, uploadedPhotos) {
       analysis: priceAnalysis
     },
     buyerConcern: concern || 'No informado',
+    blockStatuses: {
+      global: statusFromRisk,
+      price: priceStatus,
+      concern: concernStatus,
+      alerts: alerts.length ? (riskScore >= 70 ? 'critical' : 'warning') : 'ok',
+      positives: positives.length ? 'ok' : 'warning',
+      photos: photosStatus,
+      questions: 'warning',
+      nextSteps: statusFromRisk
+    },
+    photoObservations,
     riskScore,
     verdict,
     alerts,
@@ -416,9 +448,10 @@ No inventes fallas que no se ven. Usa lenguaje profesional, breve y útil.
       riskScore: Number(parsed.riskScore ?? ruleReport.riskScore),
       alerts: Array.isArray(parsed.alerts) ? parsed.alerts : ruleReport.alerts,
       positives: Array.isArray(parsed.positives) ? parsed.positives : ruleReport.positives,
-      photoObservations: Array.isArray(parsed.photoObservations) ? parsed.photoObservations : [],
+      photoObservations: Array.isArray(parsed.photoObservations) && parsed.photoObservations.length ? parsed.photoObservations : ruleReport.photoObservations,
       aiPriceOpinion: parsed.priceOpinion || '',
       buyerConcernOpinion: parsed.buyerConcernOpinion || '',
+      blockStatuses: ruleReport.blockStatuses,
       questions: Array.isArray(parsed.questions) ? parsed.questions : ruleReport.questions,
       nextSteps: Array.isArray(parsed.nextSteps) ? parsed.nextSteps : ruleReport.nextSteps,
       disclaimer: parsed.disclaimer || ruleReport.disclaimer
@@ -428,7 +461,9 @@ No inventes fallas que no se ven. Usa lenguaje profesional, breve y útil.
     return {
       ...ruleReport,
       mode: 'Reglas preventivas, IA no disponible temporalmente',
-      aiError: 'No fue posible completar el análisis con IA. Se entregó informe preventivo por reglas.'
+      photoObservations: ruleReport.photoObservations,
+      aiError: 'No fue posible completar el análisis con IA. Revisa /api/health, OPENAI_API_KEY, créditos de API y OPENAI_MODEL en Render.',
+      aiErrorDetail: error.message
     };
   }
 }
@@ -437,7 +472,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     name: 'AutoInspector',
-    version: '1.3.0-fotos-flexibles-ai-status',
+    version: '1.4.0-status-badges-ai-debug',
     aiEnabled,
     aiStatus,
     cloudinaryEnabled,
@@ -465,37 +500,34 @@ app.post('/api/inspect', upload.any(), async (req, res) => {
     const inspectionId = `insp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     const uploadedPhotos = [];
-    const fileMap = new Map();
+    const itemCounters = new Map();
+
     for (const file of files) {
-      if (!fileMap.has(file.fieldname)) fileMap.set(file.fieldname, []);
-      fileMap.get(file.fieldname).push(file);
-    }
+      const itemKey = String(file.fieldname || '').replace(/_(photos|\d+)$/, '');
+      const item = ALL_ITEMS.find((entry) => entry.key === itemKey);
+      if (!item) continue;
 
-    for (const item of ALL_ITEMS) {
-      for (let slot = 1; slot <= 2; slot++) {
-        const fieldName = `${item.key}_${slot}`;
-        const file = (fileMap.get(fieldName) || [])[0];
-        if (!file) continue;
+      const slot = (itemCounters.get(item.key) || 0) + 1;
+      itemCounters.set(item.key, slot);
 
-        const cloudinaryResult = await uploadToCloudinary(file, {
-          inspectionId,
-          itemKey: item.key,
-          itemLabel: item.label,
-          slot
-        });
+      const cloudinaryResult = await uploadToCloudinary(file, {
+        inspectionId,
+        itemKey: item.key,
+        itemLabel: item.label,
+        slot
+      });
 
-        uploadedPhotos.push({
-          itemKey: item.key,
-          itemLabel: item.label,
-          slot,
-          originalName: file.originalname,
-          mimeType: file.mimetype,
-          sizeBytes: file.size,
-          cloudinaryUrl: cloudinaryResult?.secure_url || null,
-          cloudinaryPublicId: cloudinaryResult?.public_id || null,
-          dataUrl: bufferToDataUrl(file)
-        });
-      }
+      uploadedPhotos.push({
+        itemKey: item.key,
+        itemLabel: item.label,
+        slot,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        cloudinaryUrl: cloudinaryResult?.secure_url || null,
+        cloudinaryPublicId: cloudinaryResult?.public_id || null,
+        dataUrl: bufferToDataUrl(file)
+      });
     }
 
     const byRequired = REQUIRED_ITEMS.map((item) => ({

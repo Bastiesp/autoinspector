@@ -38,7 +38,7 @@ Obligatorias solo si quieres IA y almacenamiento permanente:
 
 ```txt
 OPENAI_API_KEY=tu_clave_openai
-OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL=gpt-4o-mini
 
 CLOUDINARY_CLOUD_NAME=tu_cloud_name
 CLOUDINARY_API_KEY=tu_api_key
@@ -103,3 +103,15 @@ OPENAI_API_KEY=sk-proj_tu_clave
 ```
 
 Luego guarda los cambios y ejecuta **Manual Deploy → Deploy latest commit**. El endpoint `/api/health` ahora también devuelve `aiStatus` para explicar por qué la IA aparece desactivada.
+
+
+## Diagnóstico IA
+
+Si el informe muestra “Reglas preventivas, IA no disponible temporalmente”, abre `/api/health` en tu sitio de Render y revisa:
+
+- `aiEnabled` debe estar en `true`.
+- `OPENAI_API_KEY` debe existir en Render y empezar con `sk-` o `sk-proj-`.
+- La cuenta API debe tener créditos/facturación disponible.
+- `OPENAI_MODEL` puede quedar como `gpt-4o-mini`.
+
+Aunque la IA falle, AutoInspector mostrará observaciones preventivas por reglas y símbolos visuales por bloque: ✅ correcto, ⚠️ revisar y ❌ urgente.
