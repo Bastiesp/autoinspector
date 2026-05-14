@@ -318,6 +318,31 @@ button[disabled] { opacity: .65; cursor: not-allowed; transform: none; }
   border: 1px solid rgba(255,255,255,0.08);
 }
 .report-block.accent { border-color: rgba(56,189,248,0.28); background: rgba(56,189,248,0.09); }
+.price-card[data-level="critical-low"],
+.price-card[data-level="critical-high"] {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: linear-gradient(145deg, rgba(245,158,11,0.16), rgba(15,23,42,0.28));
+}
+.price-card[data-level="low"] {
+  border-color: rgba(34,197,94,0.36);
+  background: linear-gradient(145deg, rgba(34,197,94,0.13), rgba(15,23,42,0.25));
+}
+.price-card[data-level="market"] {
+  border-color: rgba(56,189,248,0.34);
+  background: linear-gradient(145deg, rgba(56,189,248,0.11), rgba(15,23,42,0.25));
+}
+.price-card[data-level="high"] {
+  border-color: rgba(251,191,36,0.36);
+  background: linear-gradient(145deg, rgba(251,191,36,0.12), rgba(15,23,42,0.25));
+}
+.price-card strong {
+  display: inline-flex;
+  margin-top: 12px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+}
+
 .report-block.full { margin-bottom: 14px; }
 .report-block p { margin-bottom: 0; }
 ul { margin: 0; padding-left: 20px; color: #dce6f5; }

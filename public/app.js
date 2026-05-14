@@ -37,17 +37,17 @@ function createPhotoItem(item, required) {
         <h4>${item.label}</h4>
         <small>${item.hint}</small>
       </div>
-      <small>${required ? 'Obligatorio' : 'Opcional'} · 2 fotos</small>
+      <small>${required ? 'Obligatorio' : 'Opcional'} · mínimo 2 fotos</small>
     </div>
     <div class="photo-slots">
       ${[1, 2].map((slot) => `
         <div class="photo-slot" data-field="${item.key}_${slot}">
-          <div class="slot-title"><span>Toma ${slot}</span><span class="slot-status">Sin foto</span></div>
+          <div class="slot-title"><span>Foto ${slot}</span><span class="slot-status">Sin foto</span></div>
           <div class="source-buttons">
-            <label>📷 Cámara
+            <label>📷 Tomar foto
               <input type="file" accept="image/*" capture="environment" data-field="${item.key}_${slot}" data-source="camera" ${required ? 'data-required="true"' : ''}>
             </label>
-            <label>🖼️ Galería
+            <label>🖼️ Elegir galería
               <input type="file" accept="image/*" data-field="${item.key}_${slot}" data-source="gallery" ${required ? 'data-required="true"' : ''}>
             </label>
           </div>
@@ -178,7 +178,17 @@ function renderReport(payload) {
 
   const price = report.prices?.analysis || {};
   $('#priceCategory').textContent = price.category || 'No evaluado';
-  $('#priceSummary').textContent = `${price.summary || ''} ${price.warning || ''}`.trim();
+  const priceParts = [
+    price.summary,
+    price.warning,
+    price.negotiationAdvice,
+    report.aiPriceOpinion ? `IA: ${report.aiPriceOpinion}` : ''
+  ].filter(Boolean);
+  $('#priceSummary').textContent = priceParts.join(' ');
+  const priceCard = document.querySelector('.price-card');
+  if (priceCard) {
+    priceCard.dataset.level = price.level || 'unknown';
+  }
 
   const concernText = report.buyerConcernOpinion || report.buyerConcern || 'No informado';
   $('#concernSummary').textContent = concernText;
