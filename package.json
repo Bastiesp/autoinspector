@@ -1,21 +1,22 @@
 {
   "name": "autoinspector",
-  "version": "1.1.0",
-  "description": "AutoInspector - inspección preliminar de vehículos con apoyo de IA y almacenamiento de fotos en Cloudinary",
+  "version": "1.2.0",
+  "description": "AutoInspector - inspección preliminar de vehículos usados con fotos, IA y contacto a mecánico.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
   },
   "engines": {
-    "node": "22.x"
+    "node": "20.x"
   },
   "dependencies": {
-    "cloudinary": "^2.6.1",
+    "@cloudinary/url-gen": "^1.21.0",
+    "cloudinary": "^2.5.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "multer": "^2.0.0",
+    "multer": "^1.4.5-lts.1",
     "openai": "^4.77.0"
   }
 }
