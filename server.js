@@ -18,10 +18,26 @@ const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || 'autoinspector/inspec
 const CONTACT_WHATSAPP = process.env.CONTACT_WHATSAPP || '';
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || '';
 const MECHANIC_NAME = process.env.MECHANIC_NAME || 'AutoInspector Mecánico';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
 function cleanEnvSecret(value) {
-  return String(value || '').trim().replace(/^['\"]|['\"]$/g, '');
+  return String(value || '').trim().replace(/^['"]|['"]$/g, '');
 }
+
+const GEMINI_API_KEY = cleanEnvSecret(
+  process.env.GEMINI_API_KEY ||
+  process.env.GOOGLE_AI_API_KEY ||
+  process.env.GOOGLE_API_KEY ||
+  process.env.GEMINI_KEY
+);
+
+const GEMINI_KEY_SOURCE = process.env.GEMINI_API_KEY ? 'GEMINI_API_KEY'
+  : process.env.GOOGLE_AI_API_KEY ? 'GOOGLE_AI_API_KEY'
+    : process.env.GOOGLE_API_KEY ? 'GOOGLE_API_KEY'
+      : process.env.GEMINI_KEY ? 'GEMINI_KEY'
+        : '';
+
 const OPENAI_API_KEY = cleanEnvSecret(
   process.env.OPENAI_API_KEY ||
   process.env.OPENAI_KEY ||
@@ -29,12 +45,14 @@ const OPENAI_API_KEY = cleanEnvSecret(
   process.env.API_KEY ||
   process.env.OPENAI_SECRET_KEY
 );
+
 const OPENAI_KEY_SOURCE = process.env.OPENAI_API_KEY ? 'OPENAI_API_KEY'
   : process.env.OPENAI_KEY ? 'OPENAI_KEY'
     : process.env.OPENAI_APIKEY ? 'OPENAI_APIKEY'
       : process.env.API_KEY ? 'API_KEY'
         : process.env.OPENAI_SECRET_KEY ? 'OPENAI_SECRET_KEY'
           : '';
+
 function maskKey(value) {
   if (!value) return '';
   if (value.length <= 12) return `${value.slice(0, 4)}...`;
@@ -56,11 +74,14 @@ if (cloudinaryEnabled) {
   });
 }
 
-const aiEnabled = Boolean(OPENAI_API_KEY);
-const aiStatus = aiEnabled
-  ? `Clave detectada en ${OPENAI_KEY_SOURCE || 'variable compatible'} (${maskKey(OPENAI_API_KEY)}). La prueba real depende de créditos/billing/modelo.`
-  : 'No configurada: agrega OPENAI_API_KEY en Render, sin comillas, y redeploya.';
-const openai = aiEnabled ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
+const aiProvider = GEMINI_API_KEY ? 'gemini' : OPENAI_API_KEY ? 'openai' : null;
+const aiEnabled = Boolean(aiProvider);
+const aiStatus = aiProvider === 'gemini'
+  ? `Gemini detectado en ${GEMINI_KEY_SOURCE || 'variable compatible'} (${maskKey(GEMINI_API_KEY)}). Usa ${GEMINI_MODEL}.`
+  : aiProvider === 'openai'
+    ? `OpenAI detectado en ${OPENAI_KEY_SOURCE || 'variable compatible'} (${maskKey(OPENAI_API_KEY)}). Usa ${OPENAI_MODEL}.`
+    : 'No configurada: agrega GEMINI_API_KEY en Render para usar Gemini gratis, o OPENAI_API_KEY si quieres usar OpenAI.';
+const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -377,6 +398,30 @@ function bufferToDataUrl(file) {
   return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
 }
 
+function extractBase64FromDataUrl(dataUrl) {
+  const value = String(dataUrl || '');
+  const commaIndex = value.indexOf(',');
+  return commaIndex >= 0 ? value.slice(commaIndex + 1) : value;
+}
+
+function safeJsonParseFromText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) throw new Error('La IA no devolvió texto.');
+
+  try {
+    return JSON.parse(raw);
+  } catch (_directError) {
+    const match = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
+    if (match?.[1]) return JSON.parse(match[1].trim());
+
+    const first = raw.indexOf('{');
+    const last = raw.lastIndexOf('}');
+    if (first >= 0 && last > first) return JSON.parse(raw.slice(first, last + 1));
+
+    throw new Error(`La IA respondió texto no JSON: ${raw.slice(0, 300)}`);
+  }
+}
+
 function uploadToCloudinary(file, context) {
   return new Promise((resolve, reject) => {
     if (!cloudinaryEnabled) {
@@ -408,6 +453,60 @@ function uploadToCloudinary(file, context) {
 
     Readable.from(file.buffer).pipe(stream);
   });
+}
+
+async function callGeminiVision(promptText, photos = []) {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+
+  const parts = [{ text: promptText }];
+  for (const photo of photos) {
+    parts.push({ text: `
+Imagen: ${photo.itemLabel}, toma ${photo.slot}. Analízala visualmente.` });
+    parts.push({
+      inline_data: {
+        mime_type: photo.mimeType || 'image/jpeg',
+        data: extractBase64FromDataUrl(photo.dataUrl)
+      }
+    });
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        temperature: 0.15,
+        maxOutputTokens: 2200,
+        responseMimeType: 'application/json'
+      }
+    })
+  });
+
+  const text = await response.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (_error) {
+    throw new Error(`Gemini respondió con texto no JSON. HTTP ${response.status}: ${text.slice(0, 300)}`);
+  }
+
+  if (!response.ok) {
+    const message = json?.error?.message || JSON.stringify(json).slice(0, 300);
+    throw new Error(`Gemini HTTP ${response.status}: ${message}`);
+  }
+
+  const contentText = json?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('\n')
+    .trim();
+
+  if (!contentText) {
+    const finishReason = json?.candidates?.[0]?.finishReason || 'sin finishReason';
+    throw new Error(`Gemini no devolvió contenido analizable. finishReason=${finishReason}`);
+  }
+
+  return safeJsonParseFromText(contentText);
 }
 
 async function callOpenAiVision(content) {
@@ -444,15 +543,15 @@ async function callOpenAiVision(content) {
     throw new Error('OpenAI no devolvió contenido analizable.');
   }
 
-  return JSON.parse(contentText);
+  return safeJsonParseFromText(contentText);
 }
 
 async function tryAiReport(fields, uploadedPhotos, ruleReport) {
-  if (!OPENAI_API_KEY) {
+  if (!aiProvider) {
     return {
       ...ruleReport,
       mode: 'Reglas preventivas, IA no configurada',
-      aiError: 'No hay OPENAI_API_KEY en Render. Agrega la variable y redeploya.'
+      aiError: 'No hay GEMINI_API_KEY ni OPENAI_API_KEY en Render. Para usar IA gratis en pruebas, agrega GEMINI_API_KEY y redeploya.'
     };
   }
 
@@ -465,13 +564,10 @@ async function tryAiReport(fields, uploadedPhotos, ruleReport) {
     return acc;
   }, {});
 
-  const content = [
-    {
-      type: 'text',
-      text: `
+  const promptText = `
 Eres un perito asistente de preinspección automotriz para compradores de autos usados en Chile.
 Tu tarea principal es ANALIZAR VISUALMENTE las fotos recibidas. No hagas solo un resumen de que las fotos existen.
-No reemplazas a un mecánico. Debes ser prudente, profesional y orientado a riesgos.
+No reemplazas a un mecánico. Debes ser prudente, profesional, claro y orientado a riesgos.
 
 Devuelve SOLO JSON válido con estas claves exactas:
 {
@@ -490,9 +586,10 @@ Devuelve SOLO JSON válido con estas claves exactas:
 Reglas obligatorias para photoObservations:
 - Debe contener al menos una observación por cada ítem fotografiado.
 - Cada observación debe empezar con ✅ si visualmente parece correcto, ⚠️ si requiere revisión, o ❌ si parece urgente.
-- Menciona lo que se ve o no se puede confirmar: color/estado del aceite, desgaste o profundidad visible de neumáticos, fugas aparentes, suciedad excesiva, óxido, modificaciones, mangueras, depósito, tablero, carrocería, interior, etc.
-- Si la foto es borrosa, oscura, mal encuadrada o no permite evaluar, dilo con ⚠️ y pide una nueva toma.
-- No inventes fallas que no se ven.
+- Menciona lo que realmente se ve o lo que no se puede confirmar: color/estado del aceite, desgaste visual o irregular de neumáticos, profundidad aparente, grietas, fugas aparentes, humedad, suciedad excesiva, óxido, mangueras, depósito, tablero, carrocería, interior, escape, documentos, etc.
+- Si la foto es borrosa, oscura, mal encuadrada o no permite evaluar, dilo con ⚠️ y pide una nueva toma concreta.
+- No inventes fallas que no se ven. Usa frases como "no se aprecia" o "no es posible confirmar" cuando corresponda.
+- No digas solamente "se recibieron 2 fotos". Eso está prohibido como observación principal.
 
 Datos del vehículo:
 Marca: ${fields.brand || 'No informado'}
@@ -512,30 +609,33 @@ Pérdida refrigerante: ${fields.coolantLoss || 'No informado'}
 Fotos recibidas por ítem: ${Object.entries(photosByItem).map(([k, v]) => `${k}: ${v}`).join(', ')}
 
 El priceOpinion debe analizar explícitamente si el precio de compra está muy por debajo, bajo promedio, cercano al promedio, sobre promedio o muy por encima del mercado. Si está muy por debajo o muy por encima, debe indicar alerta clara.
-      `.trim()
-    }
-  ];
+`.trim();
 
+  const openAiContent = [{ type: 'text', text: promptText }];
   for (const photo of maxPhotosForAi) {
-    content.push({ type: 'text', text: `Analiza esta imagen: ${photo.itemLabel}, toma ${photo.slot}` });
-    content.push({ type: 'image_url', image_url: { url: photo.dataUrl, detail: 'high' } });
+    openAiContent.push({ type: 'text', text: `Analiza esta imagen: ${photo.itemLabel}, toma ${photo.slot}` });
+    openAiContent.push({ type: 'image_url', image_url: { url: photo.dataUrl, detail: 'high' } });
   }
 
   try {
-    const parsed = await callOpenAiVision(content);
+    const parsed = aiProvider === 'gemini'
+      ? await callGeminiVision(promptText, maxPhotosForAi)
+      : await callOpenAiVision(openAiContent);
+
     const aiPhotoObservations = Array.isArray(parsed.photoObservations)
       ? parsed.photoObservations.filter(Boolean)
       : [];
 
     return {
       ...ruleReport,
-      mode: 'IA visual + reglas preventivas',
+      mode: aiProvider === 'gemini' ? 'Gemini Vision + reglas preventivas' : 'OpenAI Vision + reglas preventivas',
+      aiProvider,
       verdict: parsed.verdict || ruleReport.verdict,
       riskScore: Number(parsed.riskScore ?? ruleReport.riskScore),
       alerts: Array.isArray(parsed.alerts) ? parsed.alerts : ruleReport.alerts,
       positives: Array.isArray(parsed.positives) ? parsed.positives : ruleReport.positives,
       photoObservations: aiPhotoObservations.length ? aiPhotoObservations : [
-        '⚠️ La IA respondió, pero no entregó observaciones visuales específicas. Reintenta con fotos más claras y cercanas.'
+        '⚠️ La IA respondió, pero no entregó observaciones visuales específicas. Reintenta con fotos más claras, cercanas y bien iluminadas.'
       ],
       aiPriceOpinion: parsed.priceOpinion || '',
       buyerConcernOpinion: parsed.buyerConcernOpinion || '',
@@ -548,12 +648,15 @@ El priceOpinion debe analizar explícitamente si el precio de compra está muy p
     console.error('AI report error full:', error);
     return {
       ...ruleReport,
-      mode: 'Reglas preventivas, IA no disponible temporalmente',
+      mode: `Reglas preventivas, ${aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} no disponible temporalmente`,
       photoObservations: [
-        '⚠️ La IA visual no pudo ejecutarse. Este bloque muestra solo validación preventiva de fotos recibidas.',
+        `⚠️ La IA visual (${aiProvider}) no pudo ejecutarse. Este bloque muestra solo validación preventiva de fotos recibidas.`,
         ...ruleReport.photoObservations
       ],
-      aiError: 'No fue posible completar el análisis con IA visual. Revisa /api/health, /api/ai-test, OPENAI_API_KEY, créditos de API y OPENAI_MODEL en Render.',
+      aiProvider,
+      aiError: aiProvider === 'gemini'
+        ? 'No fue posible completar el análisis con Gemini Vision. Revisa /api/ai-test, GEMINI_API_KEY, GEMINI_MODEL y límites del plan gratuito.'
+        : 'No fue posible completar el análisis con OpenAI Vision. Revisa /api/ai-test, OPENAI_API_KEY, créditos de API y OPENAI_MODEL.',
       aiErrorDetail: error.message
     };
   }
@@ -563,9 +666,15 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     name: 'AutoInspector',
-    version: '1.5.0-real-vision-debug',
+    version: '1.6.0-gemini-vision-free',
     aiEnabled,
+    aiProvider,
     aiStatus,
+    geminiEnabled: Boolean(GEMINI_API_KEY),
+    geminiModel: GEMINI_MODEL,
+    geminiKeySource: GEMINI_KEY_SOURCE || null,
+    geminiKeyPreview: maskKey(GEMINI_API_KEY) || null,
+    openaiEnabled: Boolean(OPENAI_API_KEY),
     openaiModel: OPENAI_MODEL,
     openaiKeySource: OPENAI_KEY_SOURCE || null,
     openaiKeyPreview: maskKey(OPENAI_API_KEY) || null,
@@ -576,26 +685,29 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-
 app.get('/api/ai-test', async (_req, res) => {
-  if (!OPENAI_API_KEY) {
+  if (!aiProvider) {
     return res.status(400).json({
       ok: false,
       aiEnabled: false,
-      error: 'No hay OPENAI_API_KEY configurada en Render.'
+      error: 'No hay GEMINI_API_KEY ni OPENAI_API_KEY configurada en Render.'
     });
   }
 
   try {
-    const parsed = await callOpenAiVision([
-      { type: 'text', text: 'Responde SOLO JSON válido: {"ok":true,"message":"IA funcionando"}' }
-    ]);
+    const parsed = aiProvider === 'gemini'
+      ? await callGeminiVision('Responde SOLO JSON válido: {"ok":true,"message":"Gemini funcionando"}', [])
+      : await callOpenAiVision([
+          { type: 'text', text: 'Responde SOLO JSON válido: {"ok":true,"message":"OpenAI funcionando"}' }
+        ]);
+
     res.json({
       ok: true,
       aiEnabled: true,
-      model: OPENAI_MODEL,
-      keySource: OPENAI_KEY_SOURCE || null,
-      keyPreview: maskKey(OPENAI_API_KEY),
+      aiProvider,
+      model: aiProvider === 'gemini' ? GEMINI_MODEL : OPENAI_MODEL,
+      keySource: aiProvider === 'gemini' ? GEMINI_KEY_SOURCE : OPENAI_KEY_SOURCE,
+      keyPreview: aiProvider === 'gemini' ? maskKey(GEMINI_API_KEY) : maskKey(OPENAI_API_KEY),
       response: parsed
     });
   } catch (error) {
@@ -603,9 +715,10 @@ app.get('/api/ai-test', async (_req, res) => {
     res.status(500).json({
       ok: false,
       aiEnabled: true,
-      model: OPENAI_MODEL,
-      keySource: OPENAI_KEY_SOURCE || null,
-      keyPreview: maskKey(OPENAI_API_KEY),
+      aiProvider,
+      model: aiProvider === 'gemini' ? GEMINI_MODEL : OPENAI_MODEL,
+      keySource: aiProvider === 'gemini' ? GEMINI_KEY_SOURCE : OPENAI_KEY_SOURCE,
+      keyPreview: aiProvider === 'gemini' ? maskKey(GEMINI_API_KEY) : maskKey(OPENAI_API_KEY),
       error: error.message
     });
   }
@@ -702,6 +815,7 @@ app.get('*', (_req, res) => {
 app.listen(PORT, () => {
   console.log(`AutoInspector running on port ${PORT}`);
   console.log(`AI enabled: ${aiEnabled}`);
+  console.log(`AI provider: ${aiProvider || 'none'}`);
   console.log(`AI status: ${aiStatus}`);
   console.log(`Cloudinary enabled: ${cloudinaryEnabled}`);
 });

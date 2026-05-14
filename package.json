@@ -1,7 +1,7 @@
 {
   "name": "autoinspector",
-  "version": "1.2.0",
-  "description": "AutoInspector - inspección preliminar de vehículos usados con fotos, IA y contacto a mecánico.",
+  "version": "1.6.0",
+  "description": "AutoInspector - inspección preliminar de vehículos usados con fotos, Gemini Vision, Cloudinary y contacto a mecánico.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
