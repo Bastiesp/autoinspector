@@ -1,9 +1,9 @@
 'use strict';
 
 const requiredItems = [
-  { key: 'oilDipstick', label: 'Varilla de aceite', hint: 'Foto 1: aceite en la varilla. Foto 2: color/estado más cercano.' },
-  { key: 'tires', label: 'Neumáticos', hint: 'Foto 1: dibujo/profundidad. Foto 2: costado/fecha/desgaste irregular.' },
-  { key: 'engineBay', label: 'Motor / vano motor', hint: 'Foto 1: vista general. Foto 2: zonas con fugas, correas o mangueras.' }
+  { key: 'oilDipstick', label: 'Varilla de aceite', hint: 'Mínimo 2 fotos: una vista general de la varilla y otra más cercana al color/nivel del aceite.' },
+  { key: 'tires', label: 'Neumáticos', hint: 'Mínimo 2 fotos: dibujo/profundidad y costado/fecha/desgaste irregular.' },
+  { key: 'engineBay', label: 'Motor / vano motor', hint: 'Mínimo 2 fotos: vista general y zonas con fugas, correas, mangueras o ruidos visibles.' }
 ];
 
 const optionalItems = [
@@ -15,7 +15,7 @@ const optionalItems = [
   { key: 'documents', label: 'Documentos / mantenciones', hint: 'Facturas, pauta de mantención o revisión técnica.' }
 ];
 
-const selectedFiles = new Map();
+const selectedFiles = new Map(); // itemKey => File[]
 let appConfig = {};
 
 const $ = (selector) => document.querySelector(selector);
@@ -28,32 +28,41 @@ function showToast(message, timeout = 3600) {
   showToast.timer = setTimeout(() => toast.classList.add('hidden'), timeout);
 }
 
+function filesFor(itemKey) {
+  return selectedFiles.get(itemKey) || [];
+}
+
+function setFilesFor(itemKey, files) {
+  selectedFiles.set(itemKey, files.slice(0, 8));
+}
+
 function createPhotoItem(item, required) {
   const wrapper = document.createElement('article');
   wrapper.className = 'photo-item';
+  wrapper.dataset.itemKey = item.key;
   wrapper.innerHTML = `
     <div class="photo-item-head">
       <div>
         <h4>${item.label}</h4>
         <small>${item.hint}</small>
       </div>
-      <small>${required ? 'Obligatorio' : 'Opcional'} · mínimo 2 fotos</small>
+      <small class="item-counter" id="counter_${item.key}">${required ? 'Obligatorio' : 'Opcional'} · 0/2 fotos mínimas</small>
     </div>
-    <div class="photo-slots">
-      ${[1, 2].map((slot) => `
-        <div class="photo-slot" data-field="${item.key}_${slot}">
-          <div class="slot-title"><span>Foto ${slot}</span><span class="slot-status">Sin foto</span></div>
-          <div class="source-buttons">
-            <label>📷 Tomar foto
-              <input type="file" accept="image/*" capture="environment" data-field="${item.key}_${slot}" data-source="camera" ${required ? 'data-required="true"' : ''}>
-            </label>
-            <label>🖼️ Elegir galería
-              <input type="file" accept="image/*" data-field="${item.key}_${slot}" data-source="gallery" ${required ? 'data-required="true"' : ''}>
-            </label>
-          </div>
-          <div class="preview" id="preview_${item.key}_${slot}">Sin imagen seleccionada</div>
-        </div>
-      `).join('')}
+
+    <div class="photo-picker">
+      <label class="source-action">
+        <span>📷 Tomar con cámara</span>
+        <input type="file" accept="image/*" capture="environment" data-item-key="${item.key}" data-source="camera" ${required ? 'data-required-item="true"' : ''}>
+      </label>
+      <label class="source-action">
+        <span>🖼️ Elegir de galería</span>
+        <input type="file" accept="image/*" multiple data-item-key="${item.key}" data-source="gallery" ${required ? 'data-required-item="true"' : ''}>
+      </label>
+    </div>
+
+    <p class="picker-help">Puedes agregar las 2 fotos desde galería, las 2 desde cámara, o combinarlas. Si eliges galería, puedes seleccionar varias de una vez.</p>
+    <div class="preview-grid" id="preview_${item.key}">
+      <div class="empty-preview">Aún no has agregado fotos para este ítem.</div>
     </div>
   `;
   return wrapper;
@@ -62,6 +71,8 @@ function createPhotoItem(item, required) {
 function renderPhotoSections() {
   const requiredContainer = $('#requiredPhotoItems');
   const optionalContainer = $('#optionalPhotoItems');
+  requiredContainer.innerHTML = '';
+  optionalContainer.innerHTML = '';
   requiredItems.forEach((item) => requiredContainer.appendChild(createPhotoItem(item, true)));
   optionalItems.forEach((item) => optionalContainer.appendChild(createPhotoItem(item, false)));
 }
@@ -104,53 +115,89 @@ async function compressImage(file, options = {}) {
 
   if (!blob) throw new Error('No se pudo procesar la imagen.');
 
-  const safeName = file.name.replace(/\.[^.]+$/, '') || 'foto';
+  const safeName = (file.name || 'foto').replace(/\.[^.]+$/, '') || 'foto';
   return new File([blob], `${safeName}-autoinspector.jpg`, { type: 'image/jpeg' });
+}
+
+function updatePreview(itemKey) {
+  const preview = $(`#preview_${itemKey}`);
+  const counter = $(`#counter_${itemKey}`);
+  const files = filesFor(itemKey);
+  const item = [...requiredItems, ...optionalItems].find((entry) => entry.key === itemKey);
+  const isRequired = requiredItems.some((entry) => entry.key === itemKey);
+
+  if (counter) {
+    const status = files.length >= 2 ? 'OK' : `${files.length}/2 fotos mínimas`;
+    counter.textContent = `${isRequired ? 'Obligatorio' : 'Opcional'} · ${status}`;
+    counter.classList.toggle('ready', files.length >= 2);
+  }
+
+  if (!preview) return;
+  if (!files.length) {
+    preview.innerHTML = '<div class="empty-preview">Aún no has agregado fotos para este ítem.</div>';
+    return;
+  }
+
+  preview.innerHTML = files.map((file, index) => {
+    const url = URL.createObjectURL(file);
+    return `
+      <div class="preview-card">
+        <img src="${url}" alt="${item ? item.label : itemKey} foto ${index + 1}">
+        <div class="preview-meta">
+          <span>Foto ${index + 1}</span>
+          <small>${(file.size / 1024 / 1024).toFixed(2)} MB</small>
+          <button type="button" class="remove-photo" data-item-key="${itemKey}" data-index="${index}">Quitar</button>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 async function handleFileChange(event) {
   const input = event.target;
-  const file = input.files && input.files[0];
-  if (!file) return;
+  const itemKey = input.dataset.itemKey;
+  const incoming = Array.from(input.files || []);
+  if (!itemKey || !incoming.length) return;
 
-  const field = input.dataset.field;
-  const slot = document.querySelector(`.photo-slot[data-field="${field}"]`);
-  const status = slot.querySelector('.slot-status');
-  const preview = $(`#preview_${field}`);
+  const current = filesFor(itemKey);
+  const compressedFiles = [];
 
   try {
-    status.textContent = 'Comprimiendo...';
-    preview.textContent = 'Optimizando imagen para subir menos peso...';
-    const compressed = await compressImage(file);
-    selectedFiles.set(field, compressed);
-
-    const url = URL.createObjectURL(compressed);
-    preview.innerHTML = `<img src="${url}" alt="Vista previa ${field}">`;
-    preview.classList.add('done');
-    status.textContent = `${(compressed.size / 1024 / 1024).toFixed(2)} MB`;
-    showToast('Foto agregada y comprimida correctamente.');
+    showToast('Comprimiendo fotos antes de subirlas...');
+    for (const file of incoming) {
+      compressedFiles.push(await compressImage(file));
+    }
+    setFilesFor(itemKey, [...current, ...compressedFiles]);
+    updatePreview(itemKey);
+    const total = filesFor(itemKey).length;
+    showToast(total >= 2 ? 'Ítem listo: ya tiene mínimo 2 fotos.' : 'Foto agregada. Falta al menos una más para este ítem.');
   } catch (error) {
-    selectedFiles.delete(field);
+    showToast(error.message, 6200);
+  } finally {
     input.value = '';
-    status.textContent = 'Sin foto';
-    preview.textContent = error.message;
-    showToast(error.message, 5200);
   }
 }
 
+function removePhoto(itemKey, index) {
+  const files = filesFor(itemKey);
+  files.splice(index, 1);
+  setFilesFor(itemKey, files);
+  updatePreview(itemKey);
+}
+
 function appendFilesToFormData(formData) {
-  for (const [field, file] of selectedFiles.entries()) {
-    formData.append(field, file, file.name);
+  for (const [itemKey, files] of selectedFiles.entries()) {
+    files.forEach((file, index) => {
+      formData.append(`${itemKey}_${index + 1}`, file, file.name);
+    });
   }
 }
 
 function validateRequiredPhotos() {
   const missing = [];
   for (const item of requiredItems) {
-    for (const slot of [1, 2]) {
-      const field = `${item.key}_${slot}`;
-      if (!selectedFiles.has(field)) missing.push(`${item.label} toma ${slot}`);
-    }
+    const count = filesFor(item.key).length;
+    if (count < 2) missing.push(`${item.label}: faltan ${2 - count} foto(s)`);
   }
   return missing;
 }
@@ -161,7 +208,7 @@ function listToHtml(list, fallback = 'Sin información suficiente.') {
 }
 
 function escapeHtml(str) {
-  return str
+  return String(str)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -186,13 +233,9 @@ function renderReport(payload) {
   ].filter(Boolean);
   $('#priceSummary').textContent = priceParts.join(' ');
   const priceCard = document.querySelector('.price-card');
-  if (priceCard) {
-    priceCard.dataset.level = price.level || 'unknown';
-  }
+  if (priceCard) priceCard.dataset.level = price.level || 'unknown';
 
-  const concernText = report.buyerConcernOpinion || report.buyerConcern || 'No informado';
-  $('#concernSummary').textContent = concernText;
-
+  $('#concernSummary').textContent = report.buyerConcernOpinion || report.buyerConcern || 'No informado';
   $('#alertsList').innerHTML = listToHtml(report.alerts);
   $('#positivesList').innerHTML = listToHtml(report.positives);
   $('#photoObservations').innerHTML = listToHtml(report.photoObservations, 'La IA no agregó observaciones específicas de fotos.');
@@ -208,7 +251,7 @@ function renderReport(payload) {
     card.className = 'gallery-card';
     card.innerHTML = `
       <img src="${photo.cloudinaryUrl}" alt="${escapeHtml(photo.itemLabel)}">
-      <span>${escapeHtml(photo.itemLabel)} · toma ${photo.slot}</span>
+      <span>${escapeHtml(photo.itemLabel)} · foto ${photo.slot}</span>
     `;
     gallery.appendChild(card);
   }
@@ -249,14 +292,10 @@ function configureContactButtons(contact = {}, report = {}, inspectionId = '') {
   const email = String(contact.email || appConfig.contactEmail || '').trim();
   const text = buildContactText(report, inspectionId);
 
-  const whatsappUrl = whatsapp
-    ? `https://wa.me/${whatsapp}?text=${encodeURIComponent(text)}`
-    : '';
-  const emailUrl = email
-    ? `mailto:${email}?subject=${encodeURIComponent('Revisión presencial AutoInspector')}&body=${encodeURIComponent(text)}`
-    : '';
-
+  const whatsappUrl = whatsapp ? `https://wa.me/${whatsapp}?text=${encodeURIComponent(text)}` : '';
+  const emailUrl = email ? `mailto:${email}?subject=${encodeURIComponent('Revisión presencial AutoInspector')}&body=${encodeURIComponent(text)}` : '';
   const preferredUrl = whatsappUrl || emailUrl;
+
   for (const id of ['whatsappBtn', 'topContactBtn', 'reportContactBtn']) {
     const el = $(`#${id}`);
     if (!el) continue;
@@ -302,7 +341,7 @@ async function handleSubmit(event) {
   event.preventDefault();
   const missing = validateRequiredPhotos();
   if (missing.length) {
-    showToast(`Faltan fotos obligatorias: ${missing.join(', ')}`, 6200);
+    showToast(`Faltan fotos obligatorias: ${missing.join(', ')}`, 7000);
     return;
   }
 
@@ -316,14 +355,9 @@ async function handleSubmit(event) {
   showToast('Subiendo fotos comprimidas y generando informe.');
 
   try {
-    const response = await fetch('/api/inspect', {
-      method: 'POST',
-      body: formData
-    });
+    const response = await fetch('/api/inspect', { method: 'POST', body: formData });
     const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || 'No fue posible generar el informe.');
-    }
+    if (!response.ok || !data.ok) throw new Error(data.error || 'No fue posible generar el informe.');
     renderReport(data);
     showToast('Informe generado correctamente.');
   } catch (error) {
@@ -338,10 +372,7 @@ async function loadConfig() {
   try {
     const response = await fetch('/api/config');
     appConfig = await response.json();
-    configureContactButtons({
-      whatsapp: appConfig.contactWhatsapp,
-      email: appConfig.contactEmail
-    }, { verdict: 'Quiero información de revisión presencial' }, 'consulta');
+    configureContactButtons({ whatsapp: appConfig.contactWhatsapp, email: appConfig.contactEmail }, { verdict: 'Quiero información de revisión presencial' }, 'consulta');
   } catch (_error) {
     appConfig = {};
   }
@@ -350,9 +381,11 @@ async function loadConfig() {
 function init() {
   renderPhotoSections();
   document.addEventListener('change', (event) => {
-    if (event.target.matches('input[type="file"][data-field]')) {
-      handleFileChange(event);
-    }
+    if (event.target.matches('input[type="file"][data-item-key]')) handleFileChange(event);
+  });
+  document.addEventListener('click', (event) => {
+    const btn = event.target.closest('.remove-photo');
+    if (btn) removePhoto(btn.dataset.itemKey, Number(btn.dataset.index));
   });
   $('#inspectionForm').addEventListener('submit', handleSubmit);
   loadConfig();
